@@ -101,6 +101,193 @@ static void terminal_write_hex(uint32_t value) {
     }
 }
 
+static inline uint8_t port_read_u8(uint16_t port) {
+    uint8_t value;
+    __asm__ volatile ("inb %1, %0" : "=a"(value) : "dN"(port));
+    return value;
+}
+
+static uint8_t keyboard_shift_held;
+static uint8_t keyboard_extended_prefix;
+
+static char command_buffer[256];
+static size_t command_length;
+
+static const char scancode_map[128] = {
+    [0x01] = 27,
+    [0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4', [0x06] = '5',
+    [0x07] = '6', [0x08] = '7', [0x09] = '8', [0x0A] = '9', [0x0B] = '0',
+    [0x0C] = '-', [0x0D] = '=', [0x0E] = '\b', [0x0F] = '\t',
+    [0x10] = 'q', [0x11] = 'w', [0x12] = 'e', [0x13] = 'r', [0x14] = 't',
+    [0x15] = 'y', [0x16] = 'u', [0x17] = 'i', [0x18] = 'o', [0x19] = 'p',
+    [0x1A] = '[', [0x1B] = ']', [0x1C] = '\n',
+    [0x1E] = 'a', [0x1F] = 's', [0x20] = 'd', [0x21] = 'f', [0x22] = 'g',
+    [0x23] = 'h', [0x24] = 'j', [0x25] = 'k', [0x26] = 'l',
+    [0x27] = ';', [0x28] = '\'', [0x29] = '`', [0x2B] = '\\',
+    [0x2C] = 'z', [0x2D] = 'x', [0x2E] = 'c', [0x2F] = 'v', [0x30] = 'b',
+    [0x31] = 'n', [0x32] = 'm', [0x33] = ',', [0x34] = '.', [0x35] = '/',
+    [0x39] = ' '
+};
+
+static const char scancode_map_shift[128] = {
+    [0x01] = 27,
+    [0x02] = '!', [0x03] = '@', [0x04] = '#', [0x05] = '$', [0x06] = '%',
+    [0x07] = '^', [0x08] = '&', [0x09] = '*', [0x0A] = '(', [0x0B] = ')',
+    [0x0C] = '_', [0x0D] = '+', [0x0E] = '\b', [0x0F] = '\t',
+    [0x10] = 'Q', [0x11] = 'W', [0x12] = 'E', [0x13] = 'R', [0x14] = 'T',
+    [0x15] = 'Y', [0x16] = 'U', [0x17] = 'I', [0x18] = 'O', [0x19] = 'P',
+    [0x1A] = '{', [0x1B] = '}', [0x1C] = '\n',
+    [0x1E] = 'A', [0x1F] = 'S', [0x20] = 'D', [0x21] = 'F', [0x22] = 'G',
+    [0x23] = 'H', [0x24] = 'J', [0x25] = 'K', [0x26] = 'L',
+    [0x27] = ':', [0x28] = '"', [0x29] = '~', [0x2B] = '|',
+    [0x2C] = 'Z', [0x2D] = 'X', [0x2E] = 'C', [0x2F] = 'V', [0x30] = 'B',
+    [0x31] = 'N', [0x32] = 'M', [0x33] = '<', [0x34] = '>', [0x35] = '?',
+    [0x39] = ' '
+};
+
+static void terminal_backspace(void) {
+    if (terminal_col == 0) {
+        if (terminal_row == 0) {
+            return;
+        }
+        terminal_row--;
+        terminal_col = VGA_WIDTH;
+    }
+
+    terminal_col--;
+    VGA_MEMORY[terminal_row * VGA_WIDTH + terminal_col] = vga_entry(' ', terminal_color);
+}
+
+static int streq(const char* a, const char* b) {
+    size_t i = 0;
+    while (a[i] != '\0' && b[i] != '\0') {
+        if (a[i] != b[i]) {
+            return 0;
+        }
+        i++;
+    }
+    return a[i] == b[i];
+}
+
+static int starts_with(const char* text, const char* prefix) {
+    size_t i = 0;
+    while (prefix[i] != '\0') {
+        if (text[i] != prefix[i]) {
+            return 0;
+        }
+        i++;
+    }
+    return 1;
+}
+
+static void cli_prompt(void) {
+    terminal_write("> ");
+}
+
+static void cli_execute_command(void) {
+    command_buffer[command_length] = '\0';
+
+    if (command_length == 0) {
+        cli_prompt();
+        return;
+    }
+
+    if (streq(command_buffer, "help")) {
+        terminal_write("Commands: help, clear, echo <text>\n");
+        cli_prompt();
+        return;
+    }
+
+    if (streq(command_buffer, "clear")) {
+        terminal_initialize();
+        cli_prompt();
+        return;
+    }
+
+    if (starts_with(command_buffer, "echo ")) {
+        terminal_write(command_buffer + 5);
+        terminal_putchar('\n');
+        cli_prompt();
+        return;
+    }
+
+    terminal_write("Unknown command: ");
+    terminal_write(command_buffer);
+    terminal_putchar('\n');
+    cli_prompt();
+}
+
+static void cli_handle_char(char c) {
+    if (c == '\n') {
+        terminal_putchar('\n');
+        cli_execute_command();
+        command_length = 0;
+        return;
+    }
+
+    if (c == '\b') {
+        if (command_length == 0) {
+            return;
+        }
+        command_length--;
+        terminal_backspace();
+        return;
+    }
+
+    if (c < 32 || c > 126) {
+        return;
+    }
+
+    if (command_length >= sizeof(command_buffer) - 1) {
+        return;
+    }
+
+    command_buffer[command_length++] = c;
+    terminal_putchar(c);
+}
+
+static uint8_t keyboard_poll_scancode(void) {
+    if ((port_read_u8(0x64) & 0x01u) == 0) {
+        return 0;
+    }
+
+    return port_read_u8(0x60);
+}
+
+static void keyboard_handle_scancode(uint8_t scancode) {
+    if (scancode == 0xE0) {
+        keyboard_extended_prefix = 1;
+        return;
+    }
+
+    if (keyboard_extended_prefix) {
+        keyboard_extended_prefix = 0;
+        return;
+    }
+
+    if (scancode == 0x2A || scancode == 0x36) {
+        keyboard_shift_held = 1;
+        return;
+    }
+
+    if (scancode == 0xAA || scancode == 0xB6) {
+        keyboard_shift_held = 0;
+        return;
+    }
+
+    if ((scancode & 0x80u) != 0) {
+        return;
+    }
+
+    char c = keyboard_shift_held ? scancode_map_shift[scancode] : scancode_map[scancode];
+
+    if (c == 0) {
+        return;
+    }
+
+    cli_handle_char(c);
+}
+
 struct multiboot_info {
     uint32_t flags;
     uint32_t mem_lower;
@@ -141,9 +328,15 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_addr) {
     terminal_write("Custom C kernel booted.\n");
     terminal_write("Basic terminal ready.\n");
     print_boot_info(magic, mbi);
-    terminal_write("> ");
+    terminal_write("Keyboard ready (polling).\n");
+    cli_prompt();
 
     for (;;) {
-        __asm__ volatile ("hlt");
+        uint8_t scancode = keyboard_poll_scancode();
+        if (scancode != 0) {
+            keyboard_handle_scancode(scancode);
+        }
+
+        __asm__ volatile ("pause");
     }
 }
