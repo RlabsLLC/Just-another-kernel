@@ -3,8 +3,8 @@ OUTPUT_FORMAT(elf32-i386)
 
 PHDRS
 {
-    text PT_LOAD FLAGS(5);
-    data PT_LOAD FLAGS(6);
+    text PT_LOAD FLAGS(5); /* PF_R | PF_X */
+    data PT_LOAD FLAGS(6); /* PF_R | PF_W */
 }
 
 SECTIONS

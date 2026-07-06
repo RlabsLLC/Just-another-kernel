@@ -331,7 +331,7 @@ static void terminal_write_uint64(uint64_t value) {
         0x000000000000000AULL,
         0x0000000000000001ULL,
     };
-    uint8_t has_written_digit = 0;
+    uint8_t started = 0;
 
     if (value == 0) {
         terminal_putchar('0');
@@ -346,9 +346,9 @@ static void terminal_write_uint64(uint64_t value) {
             digit++;
         }
 
-        if (digit != 0 || has_written_digit) {
+        if (digit != 0 || started) {
             terminal_putchar((char)('0' + digit));
-            has_written_digit = 1;
+            started = 1;
         }
     }
 }
