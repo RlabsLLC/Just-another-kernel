@@ -44,12 +44,16 @@ static const uint8_t CMOS_REG_STATUS_A = 0x0A;
 static const uint16_t PORT_ATA_PRIMARY_BASE = 0x01F0;
 static const uint16_t PORT_ATA_PRIMARY_STATUS = 0x01F7;
 static const uint16_t PORT_NOT_APPLICABLE = 0xFFFF;
-static const size_t SERIAL_TRANSMIT_MAX_RETRIES = 65535u;
+static const size_t SERIAL_TRANSMIT_MAX_RETRIES = 8192u;
+static const char* const KERNEL_PATCH_VERSION = "26.4.1";
+static const char* const KERNEL_PATCH_LABEL = "[Patch 26.4.1 - Bootable Universal]";
 
 static uint8_t terminal_vga_enabled = 1;
 static uint8_t serial_console_enabled;
 static uint8_t framebuffer_video_enabled;
 static uint8_t vga_text_available;
+static uint8_t driver_status_overflowed;
+static uint8_t framebuffer_reject_non_32bpp;
 
 static volatile uint8_t* framebuffer_memory;
 static uint16_t framebuffer_width;
@@ -121,7 +125,7 @@ static uint8_t status_is_present(uint8_t status) {
 }
 
 static void framebuffer_clear(uint32_t rgb) {
-    if (!framebuffer_video_enabled || framebuffer_memory == 0 || framebuffer_bpp != 32u) {
+    if (!framebuffer_video_enabled || framebuffer_bpp != 32u) {
         return;
     }
 
@@ -141,6 +145,7 @@ static void video_try_initialize(const struct multiboot_info* mbi) {
     framebuffer_height = 0;
     framebuffer_pitch = 0;
     framebuffer_bpp = 0;
+    framebuffer_reject_non_32bpp = 0;
 
     if ((mbi->flags & (1u << 11)) == 0 || mbi->vbe_mode_info == 0) {
         return;
@@ -152,6 +157,7 @@ static void video_try_initialize(const struct multiboot_info* mbi) {
     }
 
     if (mode_info->bpp != 32u) {
+        framebuffer_reject_non_32bpp = 1;
         return;
     }
 
@@ -299,8 +305,6 @@ static uint8_t keyboard_extended_prefix;
 static char command_buffer[256];
 static size_t command_length;
 
-static const char* const KERNEL_PATCH_LABEL = "[Patch 26.4.1 - Bootable Universal]";
-
 struct driver_status {
     const char* name;
     uint16_t io_base;
@@ -312,6 +316,7 @@ static size_t driver_status_count;
 
 static void driver_status_push(const char* name, uint16_t io_base, uint8_t ready) {
     if (driver_status_count >= DRIVER_STATUS_CAPACITY) {
+        driver_status_overflowed = 1;
         return;
     }
 
@@ -403,6 +408,10 @@ static void print_driver_statuses(void) {
         terminal_write(driver_statuses[i].ready ? "ready" : "unavailable (skipped)");
         terminal_putchar('\n');
     }
+
+    if (driver_status_overflowed) {
+        terminal_write("- Warning: driver list truncated due to capacity limit.\n");
+    }
 }
 
 static void cli_execute_command(void) {
@@ -439,6 +448,9 @@ static void cli_execute_command(void) {
     }
 
     if (streq(command_buffer, "version")) {
+        terminal_write("Version ");
+        terminal_write(KERNEL_PATCH_VERSION);
+        terminal_write(" ");
         terminal_write(KERNEL_PATCH_LABEL);
         terminal_putchar('\n');
         cli_prompt();
@@ -556,6 +568,8 @@ static void print_boot_info(uint32_t magic, const struct multiboot_info* mbi) {
         terminal_write("x");
         terminal_write_uint(framebuffer_bpp);
         terminal_putchar('\n');
+    } else if (framebuffer_reject_non_32bpp) {
+        terminal_write("Video driver: unsupported VBE bpp; using VGA text / serial fallback\n");
     } else {
         terminal_write("Video driver: VGA text / serial fallback\n");
     }
@@ -564,6 +578,7 @@ static void print_boot_info(uint32_t magic, const struct multiboot_info* mbi) {
 static void detect_drivers(void) {
     uint8_t status;
     driver_status_count = 0;
+    driver_status_overflowed = 0;
 
     driver_status_push("VGA text", PORT_VGA_STATUS, vga_text_available);
 
@@ -572,12 +587,12 @@ static void detect_drivers(void) {
     status = port_read_u8(PORT_PS2_STATUS);
     driver_status_push("PS/2 keyboard", PORT_PS2_STATUS, status_is_present(status));
 
+    status = port_read_u8(PORT_PIT_COMMAND);
     port_write_u8(PORT_PIT_COMMAND, PIT_MODE_SQUARE_WAVE);
     port_write_u8(PORT_PIT_CHANNEL0, (uint8_t)(PIT_DIVISOR_APPROX_100HZ & 0xFFu));
     port_write_u8(PORT_PIT_CHANNEL0, (uint8_t)(PIT_DIVISOR_APPROX_100HZ >> 8));
-    driver_status_push("PIT timer", PORT_PIT_CHANNEL0, 1);
+    driver_status_push("PIT timer", PORT_PIT_CHANNEL0, status_is_present(status));
 
-    serial_try_initialize();
     status = port_read_u8(PORT_COM1 + 5);
     driver_status_push("Serial COM1", PORT_COM1, status_is_present(status));
 
