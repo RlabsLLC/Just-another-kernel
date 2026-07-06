@@ -310,28 +310,28 @@ static void terminal_write_uint(uint32_t value) {
 
 static void terminal_write_uint64(uint64_t value) {
     static const uint64_t powers_of_10[] = {
-        10000000000000000000ULL,
-        1000000000000000000ULL,
-        100000000000000000ULL,
-        10000000000000000ULL,
-        1000000000000000ULL,
-        100000000000000ULL,
-        10000000000000ULL,
-        1000000000000ULL,
-        100000000000ULL,
-        10000000000ULL,
-        1000000000ULL,
-        100000000ULL,
-        10000000ULL,
-        1000000ULL,
-        100000ULL,
-        10000ULL,
-        1000ULL,
-        100ULL,
-        10ULL,
-        1ULL,
+        0x8AC7230489E80000ULL,
+        0x0DE0B6B3A7640000ULL,
+        0x016345785D8A0000ULL,
+        0x002386F26FC10000ULL,
+        0x00038D7EA4C68000ULL,
+        0x00005AF3107A4000ULL,
+        0x000009184E72A000ULL,
+        0x000000E8D4A51000ULL,
+        0x000000174876E800ULL,
+        0x00000002540BE400ULL,
+        0x000000003B9ACA00ULL,
+        0x0000000005F5E100ULL,
+        0x0000000000989680ULL,
+        0x00000000000F4240ULL,
+        0x00000000000186A0ULL,
+        0x0000000000002710ULL,
+        0x00000000000003E8ULL,
+        0x0000000000000064ULL,
+        0x000000000000000AULL,
+        0x0000000000000001ULL,
     };
-    uint8_t wrote_digit = 0;
+    uint8_t has_written_digit = 0;
 
     if (value == 0) {
         terminal_putchar('0');
@@ -346,9 +346,9 @@ static void terminal_write_uint64(uint64_t value) {
             digit++;
         }
 
-        if (digit != 0 || wrote_digit) {
+        if (digit != 0 || has_written_digit) {
             terminal_putchar((char)('0' + digit));
-            wrote_digit = 1;
+            has_written_digit = 1;
         }
     }
 }
