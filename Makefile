@@ -1,15 +1,27 @@
-CC ?= clang
+CC ?= cc
 KERNEL_LD ?= i686-elf-ld
 ZIG ?= tools/zig/zig
 
+HOST_OS := $(shell uname -s)
+
+ifeq ($(HOST_OS),Darwin)
+TARGET_FLAGS := -target i686-elf -m32
+else
+TARGET_FLAGS := -m32
+endif
+
 ifeq ($(shell command -v $(KERNEL_LD) >/dev/null 2>&1; echo $$?),1)
+ifneq ($(shell command -v ld.lld >/dev/null 2>&1; echo $$?),1)
+KERNEL_LD := ld.lld
+else
 ifneq ($(wildcard $(ZIG)),)
 KERNEL_LD := $(ZIG) ld.lld
 endif
 endif
+endif
 
-CFLAGS := -target i686-elf -ffreestanding -fno-stack-protector -fno-pic -m32 -O2 -Wall -Wextra
-ASFLAGS := -target i686-elf -m32 -ffreestanding
+CFLAGS := $(TARGET_FLAGS) -ffreestanding -fno-stack-protector -fno-pic -O2 -Wall -Wextra
+ASFLAGS := $(TARGET_FLAGS) -ffreestanding
 LDFLAGS := -m elf_i386 -T linker.ld --build-id=none
 
 BUILD_DIR := build
