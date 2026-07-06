@@ -12,7 +12,7 @@
 
 .section .text
 .global _start
-.type _start, @function
+.type _start, %function
 _start:
     cli
     mov $stack_top, %esp
