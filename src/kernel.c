@@ -38,6 +38,7 @@ static const uint16_t PORT_PIT_COMMAND = 0x0043;
 static const uint16_t PORT_COM1 = 0x03F8;
 static const uint16_t PORT_CMOS_INDEX = 0x0070;
 static const uint16_t PORT_CMOS_DATA = 0x0071;
+static const uint16_t PORT_KEYBOARD_COMMAND = 0x0064;
 static const uint8_t CMOS_REG_STATUS_A = 0x0A;
 static const uint8_t CMOS_NMI_DISABLE = 0x80;
 static const uint16_t PORT_ATA_PRIMARY_BASE = 0x01F0;
@@ -60,6 +61,11 @@ static uint16_t framebuffer_width;
 static uint16_t framebuffer_height;
 static uint16_t framebuffer_pitch;
 static uint8_t framebuffer_bpp;
+
+struct multiboot_info;
+
+static const struct multiboot_info* boot_mbi;
+static uint64_t kernel_poll_ticks;
 
 struct vbe_mode_info {
     uint16_t attributes;
@@ -302,6 +308,25 @@ static void terminal_write_uint(uint32_t value) {
     }
 }
 
+static void terminal_write_uint64(uint64_t value) {
+    char buffer[20];
+    size_t i = 0;
+
+    if (value == 0) {
+        terminal_putchar('0');
+        return;
+    }
+
+    while (value > 0) {
+        buffer[i++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+
+    while (i > 0) {
+        terminal_putchar(buffer[--i]);
+    }
+}
+
 static void terminal_write_hex(uint32_t value) {
     const char* digits = "0123456789ABCDEF";
     terminal_write("0x");
@@ -426,6 +451,94 @@ static void print_driver_statuses(void) {
     }
 }
 
+static void cli_command_help(void) {
+    terminal_write("Commands: help, clear, echo <text>, drivers, version, about, mem, video, serial, uptime, halt, reboot, bash\n");
+}
+
+static void cli_command_about(void) {
+    terminal_write("Kernel: Custom Minimal C Kernel\n");
+    terminal_write("Patch: ");
+    terminal_write(KERNEL_PATCH_LABEL);
+    terminal_putchar('\n');
+    terminal_write("Architecture: i386 freestanding (Multiboot)\n");
+}
+
+static void cli_command_mem(void) {
+    if (boot_mbi == 0 || (boot_mbi->flags & (1u << 0)) == 0) {
+        terminal_write("Memory info unavailable from Multiboot.\n");
+        return;
+    }
+
+    terminal_write("Lower memory (KB): ");
+    terminal_write_uint(boot_mbi->mem_lower);
+    terminal_putchar('\n');
+    terminal_write("Upper memory (KB): ");
+    terminal_write_uint(boot_mbi->mem_upper);
+    terminal_putchar('\n');
+}
+
+static void cli_command_video(void) {
+    if (framebuffer_video_enabled) {
+        terminal_write("Video: VBE framebuffer ");
+        terminal_write_uint(framebuffer_width);
+        terminal_write("x");
+        terminal_write_uint(framebuffer_height);
+        terminal_write("x");
+        terminal_write_uint(framebuffer_bpp);
+        terminal_putchar('\n');
+        return;
+    }
+
+    if (framebuffer_reject_non_32bpp) {
+        terminal_write("Video: unsupported VBE bpp, using VGA text/serial fallback\n");
+        return;
+    }
+
+    if (terminal_vga_enabled) {
+        terminal_write("Video: VGA text mode\n");
+        return;
+    }
+
+    terminal_write("Video: serial console fallback\n");
+}
+
+static void cli_command_serial(void) {
+    terminal_write("Serial COM1: ");
+    terminal_write(serial_console_enabled ? "enabled" : "disabled");
+    terminal_putchar('\n');
+}
+
+static void cli_command_uptime(void) {
+    terminal_write("Kernel poll ticks: ");
+    terminal_write_uint64(kernel_poll_ticks);
+    terminal_putchar('\n');
+}
+
+static void cli_command_halt(void) {
+    terminal_write("CPU halted. Reset VM to continue.\n");
+    for (;;) {
+        __asm__ volatile ("hlt");
+    }
+}
+
+static void cli_command_reboot(void) {
+    terminal_write("Rebooting...\n");
+
+    for (size_t spin = 0; spin < 100000; spin++) {
+        if ((port_read_u8(PORT_PS2_STATUS) & 0x02u) == 0) {
+            break;
+        }
+    }
+
+    port_write_u8(PORT_KEYBOARD_COMMAND, 0xFE);
+    terminal_write("Reboot command sent (controller may ignore in some VMs).\n");
+}
+
+static void cli_command_bash(void) {
+    terminal_write("GNU Bash cannot run directly in this freestanding kernel.\n");
+    terminal_write("Use host GNU Bash mode: ./run-kernel.sh --bash\n");
+}
+
 static void cli_execute_command(void) {
     command_buffer[command_length] = '\0';
 
@@ -435,7 +548,7 @@ static void cli_execute_command(void) {
     }
 
     if (streq(command_buffer, "help")) {
-        terminal_write("Commands: help, clear, echo <text>, drivers, version\n");
+        cli_command_help();
         cli_prompt();
         return;
     }
@@ -465,6 +578,53 @@ static void cli_execute_command(void) {
         terminal_write(" ");
         terminal_write(KERNEL_PATCH_LABEL);
         terminal_putchar('\n');
+        cli_prompt();
+        return;
+    }
+
+    if (streq(command_buffer, "about")) {
+        cli_command_about();
+        cli_prompt();
+        return;
+    }
+
+    if (streq(command_buffer, "mem")) {
+        cli_command_mem();
+        cli_prompt();
+        return;
+    }
+
+    if (streq(command_buffer, "video")) {
+        cli_command_video();
+        cli_prompt();
+        return;
+    }
+
+    if (streq(command_buffer, "serial")) {
+        cli_command_serial();
+        cli_prompt();
+        return;
+    }
+
+    if (streq(command_buffer, "uptime")) {
+        cli_command_uptime();
+        cli_prompt();
+        return;
+    }
+
+    if (streq(command_buffer, "halt")) {
+        cli_command_halt();
+        return;
+    }
+
+    if (streq(command_buffer, "reboot")) {
+        cli_command_reboot();
+        cli_prompt();
+        return;
+    }
+
+    if (streq(command_buffer, "bash")) {
+        cli_command_bash();
         cli_prompt();
         return;
     }
@@ -617,6 +777,9 @@ static void detect_drivers(void) {
 void kernel_main(uint32_t magic, uint32_t multiboot_info_addr) {
     const struct multiboot_info* mbi = (const struct multiboot_info*)(uintptr_t)multiboot_info_addr;
 
+    boot_mbi = mbi;
+    kernel_poll_ticks = 0;
+
     serial_try_initialize();
     video_try_initialize(mbi);
     terminal_initialize();
@@ -632,6 +795,7 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_addr) {
     cli_prompt();
 
     for (;;) {
+        kernel_poll_ticks++;
         uint8_t scancode = keyboard_poll_scancode();
         if (scancode != 0) {
             keyboard_handle_scancode(scancode);

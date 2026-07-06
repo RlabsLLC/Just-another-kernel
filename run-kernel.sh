@@ -7,9 +7,72 @@ cd "$ROOT_DIR"
 KERNEL_ELF="build/kernel.elf"
 BUILD_DIR="build"
 BOOT_ISO="$BUILD_DIR/kernel.iso"
+HOST_BASH_MODE=0
 
 log() {
     printf '[kernel-runner] %s\n' "$*"
+}
+
+parse_args() {
+    local filtered=()
+
+    for arg in "$@"; do
+        case "$arg" in
+            --bash)
+                HOST_BASH_MODE=1
+                ;;
+            *)
+                filtered+=("$arg")
+                ;;
+        esac
+    done
+
+    set -- "${filtered[@]}"
+    RUN_ARGS=("$@")
+}
+
+launch_host_bash() {
+    local bash_bin
+    local bash_banner
+    local rc_file
+
+    if ! command -v bash >/dev/null 2>&1; then
+        log "GNU Bash was not found on this host."
+        exit 1
+    fi
+
+    bash_bin="$(command -v bash)"
+    bash_banner="$($bash_bin --version 2>/dev/null | head -n 1)"
+
+    if [[ "$bash_banner" != *"GNU bash"* ]]; then
+        log "The detected shell at ${bash_bin} is not GNU Bash."
+        exit 1
+    fi
+
+    rc_file="$(mktemp)"
+    printf 'JAK_ROOT=%q\n' "$ROOT_DIR" > "$rc_file"
+
+    cat >> "$rc_file" <<'EOF'
+kernel-build() {
+    (cd "$JAK_ROOT" && make "$@")
+}
+
+kernel-run() {
+    (cd "$JAK_ROOT" && "$JAK_ROOT/run-kernel.sh" "$@")
+}
+
+kernel-clean() {
+    (cd "$JAK_ROOT" && make clean)
+}
+
+printf 'JAK GNU Bash shell ready.\n'
+printf 'Helpers: kernel-build, kernel-run, kernel-clean\n'
+printf 'Project root: %s\n' "$JAK_ROOT"
+PS1='jak-bash$ '
+EOF
+
+    log "Launching GNU Bash shell from ${bash_bin}."
+    exec "$bash_bin" --noprofile --norc --rcfile "$rc_file" -i
 }
 
 find_qemu() {
@@ -141,6 +204,13 @@ EOF
 }
 
 main() {
+    parse_args "$@"
+
+    if (( HOST_BASH_MODE == 1 )); then
+        launch_host_bash
+        return
+    fi
+
     build_kernel_if_needed
     ensure_bootloader_tools
 
@@ -163,7 +233,7 @@ main() {
         -boot d \
         -no-reboot \
         -no-shutdown \
-        "$@"
+        "${RUN_ARGS[@]}"
 }
 
 main "$@"
