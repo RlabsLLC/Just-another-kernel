@@ -118,6 +118,20 @@ static char command_buffer[256];
 static size_t command_length;
 
 static const char* const KERNEL_PATCH_LABEL = "[Patch 26.4.1 - Bootable Universal]";
+enum { DRIVER_STATUS_CAPACITY = 6 };
+
+static const uint16_t PORT_VGA_STATUS = 0x03DA;
+static const uint16_t PORT_PS2_STATUS = 0x0064;
+static const uint16_t PORT_PS2_DATA = 0x0060;
+static const uint16_t PORT_PIT_CHANNEL0 = 0x0040;
+static const uint16_t PORT_PIT_COMMAND = 0x0043;
+static const uint8_t PIT_MODE_SQUARE_WAVE = 0x36;
+static const uint16_t PIT_DIVISOR_100HZ = 0x2E9B;
+static const uint16_t PORT_COM1 = 0x03F8;
+static const uint16_t PORT_CMOS_INDEX = 0x0070;
+static const uint16_t PORT_CMOS_DATA = 0x0071;
+static const uint8_t CMOS_REG_STATUS_A = 0x0A;
+static const uint16_t PORT_ATA_PRIMARY_STATUS = 0x01F7;
 
 struct driver_status {
     const char* name;
@@ -125,8 +139,12 @@ struct driver_status {
     uint8_t ready;
 };
 
-static struct driver_status driver_statuses[6];
+static struct driver_status driver_statuses[DRIVER_STATUS_CAPACITY];
 static size_t driver_status_count;
+
+static uint8_t status_is_present(uint8_t status) {
+    return status != 0xFFu;
+}
 
 static const char scancode_map[128] = {
     [0x01] = 27,
@@ -287,11 +305,11 @@ static void cli_handle_char(char c) {
 }
 
 static uint8_t keyboard_poll_scancode(void) {
-    if ((port_read_u8(0x64) & 0x01u) == 0) {
+    if ((port_read_u8(PORT_PS2_STATUS) & 0x01u) == 0) {
         return 0;
     }
 
-    return port_read_u8(0x60);
+    return port_read_u8(PORT_PS2_DATA);
 }
 
 static void keyboard_handle_scancode(uint8_t scancode) {
@@ -365,33 +383,33 @@ static void detect_drivers(void) {
     uint8_t status;
     driver_status_count = 0;
 
-    status = port_read_u8(0x3DA);
-    driver_statuses[driver_status_count++] = (struct driver_status){ "VGA text", 0x03DA, (uint8_t)(status != 0xFFu) };
+    status = port_read_u8(PORT_VGA_STATUS);
+    driver_statuses[driver_status_count++] = (struct driver_status){ "VGA text", PORT_VGA_STATUS, status_is_present(status) };
 
-    status = port_read_u8(0x64);
-    driver_statuses[driver_status_count++] = (struct driver_status){ "PS/2 keyboard", 0x0064, (uint8_t)(status != 0xFFu) };
+    status = port_read_u8(PORT_PS2_STATUS);
+    driver_statuses[driver_status_count++] = (struct driver_status){ "PS/2 keyboard", PORT_PS2_STATUS, status_is_present(status) };
 
-    port_write_u8(0x43, 0x36);
-    port_write_u8(0x40, 0x9B);
-    port_write_u8(0x40, 0x2E);
-    driver_statuses[driver_status_count++] = (struct driver_status){ "PIT timer", 0x0040, 1 };
+    port_write_u8(PORT_PIT_COMMAND, PIT_MODE_SQUARE_WAVE);
+    port_write_u8(PORT_PIT_CHANNEL0, (uint8_t)(PIT_DIVISOR_100HZ & 0xFFu));
+    port_write_u8(PORT_PIT_CHANNEL0, (uint8_t)(PIT_DIVISOR_100HZ >> 8));
+    driver_statuses[driver_status_count++] = (struct driver_status){ "PIT timer", PORT_PIT_CHANNEL0, 1 };
 
-    port_write_u8(0x3F8 + 1, 0x00);
-    port_write_u8(0x3F8 + 3, 0x80);
-    port_write_u8(0x3F8 + 0, 0x03);
-    port_write_u8(0x3F8 + 1, 0x00);
-    port_write_u8(0x3F8 + 3, 0x03);
-    port_write_u8(0x3F8 + 2, 0xC7);
-    port_write_u8(0x3F8 + 4, 0x0B);
-    status = port_read_u8(0x3F8 + 5);
-    driver_statuses[driver_status_count++] = (struct driver_status){ "Serial COM1", 0x03F8, (uint8_t)(status != 0xFFu) };
+    port_write_u8(PORT_COM1 + 1, 0x00);
+    port_write_u8(PORT_COM1 + 3, 0x80);
+    port_write_u8(PORT_COM1 + 0, 0x03);
+    port_write_u8(PORT_COM1 + 1, 0x00);
+    port_write_u8(PORT_COM1 + 3, 0x03);
+    port_write_u8(PORT_COM1 + 2, 0xC7);
+    port_write_u8(PORT_COM1 + 4, 0x0B);
+    status = port_read_u8(PORT_COM1 + 5);
+    driver_statuses[driver_status_count++] = (struct driver_status){ "Serial COM1", PORT_COM1, status_is_present(status) };
 
-    port_write_u8(0x70, 0x0A);
-    status = port_read_u8(0x71);
-    driver_statuses[driver_status_count++] = (struct driver_status){ "CMOS RTC", 0x0070, (uint8_t)(status != 0xFFu) };
+    port_write_u8(PORT_CMOS_INDEX, CMOS_REG_STATUS_A);
+    status = port_read_u8(PORT_CMOS_DATA);
+    driver_statuses[driver_status_count++] = (struct driver_status){ "CMOS RTC", PORT_CMOS_INDEX, status_is_present(status) };
 
-    status = port_read_u8(0x1F7);
-    driver_statuses[driver_status_count++] = (struct driver_status){ "ATA primary", 0x01F0, (uint8_t)(status != 0xFFu) };
+    status = port_read_u8(PORT_ATA_PRIMARY_STATUS);
+    driver_statuses[driver_status_count++] = (struct driver_status){ "ATA primary", 0x01F0, status_is_present(status) };
 }
 
 void kernel_main(uint32_t magic, uint32_t multiboot_info_addr) {
