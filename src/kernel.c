@@ -24,6 +24,10 @@ static inline uint8_t port_read_u8(uint16_t port) {
     return value;
 }
 
+static inline void port_write_u8(uint16_t port, uint8_t value) {
+    __asm__ volatile ("outb %0, %1" : : "a"(value), "dN"(port));
+}
+
 static void terminal_clear_row(size_t row) {
     for (size_t x = 0; x < VGA_WIDTH; x++) {
         VGA_MEMORY[row * VGA_WIDTH + x] = vga_entry(' ', terminal_color);
@@ -113,6 +117,17 @@ static uint8_t keyboard_extended_prefix;
 static char command_buffer[256];
 static size_t command_length;
 
+static const char* const KERNEL_PATCH_LABEL = "[Patch 26.4.1 - Bootable Universal]";
+
+struct driver_status {
+    const char* name;
+    uint16_t io_base;
+    uint8_t ready;
+};
+
+static struct driver_status driver_statuses[6];
+static size_t driver_status_count;
+
 static const char scancode_map[128] = {
     [0x01] = 27,
     [0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4', [0x06] = '5',
@@ -184,6 +199,18 @@ static void cli_prompt(void) {
     terminal_write("> ");
 }
 
+static void print_driver_statuses(void) {
+    for (size_t i = 0; i < driver_status_count; i++) {
+        terminal_write("- ");
+        terminal_write(driver_statuses[i].name);
+        terminal_write(" @ ");
+        terminal_write_hex(driver_statuses[i].io_base);
+        terminal_write(": ");
+        terminal_write(driver_statuses[i].ready ? "ready" : "unavailable (skipped)");
+        terminal_putchar('\n');
+    }
+}
+
 static void cli_execute_command(void) {
     command_buffer[command_length] = '\0';
 
@@ -193,7 +220,7 @@ static void cli_execute_command(void) {
     }
 
     if (streq(command_buffer, "help")) {
-        terminal_write("Commands: help, clear, echo <text>\n");
+        terminal_write("Commands: help, clear, echo <text>, drivers, version\n");
         cli_prompt();
         return;
     }
@@ -206,6 +233,19 @@ static void cli_execute_command(void) {
 
     if (starts_with(command_buffer, "echo ")) {
         terminal_write(command_buffer + 5);
+        terminal_putchar('\n');
+        cli_prompt();
+        return;
+    }
+
+    if (streq(command_buffer, "drivers")) {
+        print_driver_statuses();
+        cli_prompt();
+        return;
+    }
+
+    if (streq(command_buffer, "version")) {
+        terminal_write(KERNEL_PATCH_LABEL);
         terminal_putchar('\n');
         cli_prompt();
         return;
@@ -321,14 +361,52 @@ static void print_boot_info(uint32_t magic, const struct multiboot_info* mbi) {
     }
 }
 
+static void detect_drivers(void) {
+    uint8_t status;
+    driver_status_count = 0;
+
+    status = port_read_u8(0x3DA);
+    driver_statuses[driver_status_count++] = (struct driver_status){ "VGA text", 0x03DA, (uint8_t)(status != 0xFFu) };
+
+    status = port_read_u8(0x64);
+    driver_statuses[driver_status_count++] = (struct driver_status){ "PS/2 keyboard", 0x0064, (uint8_t)(status != 0xFFu) };
+
+    port_write_u8(0x43, 0x36);
+    port_write_u8(0x40, 0x9B);
+    port_write_u8(0x40, 0x2E);
+    driver_statuses[driver_status_count++] = (struct driver_status){ "PIT timer", 0x0040, 1 };
+
+    port_write_u8(0x3F8 + 1, 0x00);
+    port_write_u8(0x3F8 + 3, 0x80);
+    port_write_u8(0x3F8 + 0, 0x03);
+    port_write_u8(0x3F8 + 1, 0x00);
+    port_write_u8(0x3F8 + 3, 0x03);
+    port_write_u8(0x3F8 + 2, 0xC7);
+    port_write_u8(0x3F8 + 4, 0x0B);
+    status = port_read_u8(0x3F8 + 5);
+    driver_statuses[driver_status_count++] = (struct driver_status){ "Serial COM1", 0x03F8, (uint8_t)(status != 0xFFu) };
+
+    port_write_u8(0x70, 0x0A);
+    status = port_read_u8(0x71);
+    driver_statuses[driver_status_count++] = (struct driver_status){ "CMOS RTC", 0x0070, (uint8_t)(status != 0xFFu) };
+
+    status = port_read_u8(0x1F7);
+    driver_statuses[driver_status_count++] = (struct driver_status){ "ATA primary", 0x01F0, (uint8_t)(status != 0xFFu) };
+}
+
 void kernel_main(uint32_t magic, uint32_t multiboot_info_addr) {
     const struct multiboot_info* mbi = (const struct multiboot_info*)(uintptr_t)multiboot_info_addr;
 
     terminal_initialize();
     terminal_write("Custom C kernel booted.\n");
+    terminal_write(KERNEL_PATCH_LABEL);
+    terminal_putchar('\n');
     terminal_write("Basic terminal ready.\n");
     print_boot_info(magic, mbi);
-    terminal_write("Keyboard ready (polling).\n");
+    terminal_write("Probing drivers...\n");
+    detect_drivers();
+    print_driver_statuses();
+    terminal_write("Keyboard input mode: polling.\n");
     cli_prompt();
 
     for (;;) {
