@@ -1,10 +1,21 @@
+/* PVH ELF note – required by QEMU 5+ to boot an uncompressed ELF kernel
+ * directly via the -kernel flag (XEN_ELFNOTE_PHYS32_ENTRY = 18).
+ */
+.section .note.Xen, "a"
+.align 4
+.long 4         /* namesz: length of "Xen\0" */
+.long 4         /* descsz: 32-bit physical entry address */
+.long 18        /* type: XEN_ELFNOTE_PHYS32_ENTRY */
+.ascii "Xen\0"  /* name */
+.long _start    /* desc: protected-mode 32-bit entry point */
+
 .set ALIGN,    1<<0
 .set MEMINFO,  1<<1
 .set FLAGS,    ALIGN | MEMINFO
 .set MAGIC,    0x1BADB002
 .set CHECKSUM, -(MAGIC + FLAGS)
 
-.section .multiboot
+.section .multiboot, "a"
 .align 4
 .long MAGIC
 .long FLAGS

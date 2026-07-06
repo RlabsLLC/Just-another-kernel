@@ -4,6 +4,11 @@ SECTIONS
 {
     . = 1M;
 
+    .note.Xen :
+    {
+        *(.note.Xen)
+    }
+
     .multiboot :
     {
         *(.multiboot)
