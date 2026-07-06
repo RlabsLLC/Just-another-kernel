@@ -35,16 +35,16 @@ static const uint16_t PORT_PS2_STATUS = 0x0064;
 static const uint16_t PORT_PS2_DATA = 0x0060;
 static const uint16_t PORT_PIT_CHANNEL0 = 0x0040;
 static const uint16_t PORT_PIT_COMMAND = 0x0043;
-static const uint8_t PIT_MODE_SQUARE_WAVE = 0x36;
-static const uint16_t PIT_DIVISOR_APPROX_100HZ = 0x2E9C;
 static const uint16_t PORT_COM1 = 0x03F8;
 static const uint16_t PORT_CMOS_INDEX = 0x0070;
 static const uint16_t PORT_CMOS_DATA = 0x0071;
 static const uint8_t CMOS_REG_STATUS_A = 0x0A;
+static const uint8_t CMOS_NMI_DISABLE = 0x80;
 static const uint16_t PORT_ATA_PRIMARY_BASE = 0x01F0;
 static const uint16_t PORT_ATA_PRIMARY_STATUS = 0x01F7;
 static const uint16_t PORT_NOT_APPLICABLE = 0xFFFF;
 static const size_t SERIAL_TRANSMIT_MAX_RETRIES = 8192u;
+static const uint8_t FRAMEBUFFER_REQUIRED_BPP = 32u;
 static const char* const KERNEL_PATCH_VERSION = "26.4.1";
 static const char* const KERNEL_PATCH_LABEL = "[Patch 26.4.1 - Bootable Universal]";
 
@@ -124,14 +124,26 @@ static uint8_t status_is_present(uint8_t status) {
     return status != 0xFFu;
 }
 
-static void framebuffer_clear(uint32_t rgb) {
-    if (!framebuffer_video_enabled || framebuffer_bpp != 32u) {
+static uint8_t detect_vga_text_available(void) {
+    uint8_t samples_all_ff = 1;
+    for (size_t i = 0; i < 4; i++) {
+        if (port_read_u8(PORT_VGA_STATUS) != 0xFFu) {
+            samples_all_ff = 0;
+            break;
+        }
+    }
+
+    return (uint8_t)!samples_all_ff;
+}
+
+static void framebuffer_clear(uint32_t color24) {
+    if (!framebuffer_video_enabled || framebuffer_bpp != FRAMEBUFFER_REQUIRED_BPP) {
         return;
     }
 
-    uint32_t color = rgb & 0x00FFFFFFu;
+    uint32_t color = color24 & 0x00FFFFFFu;
     for (uint16_t y = 0; y < framebuffer_height; y++) {
-        uint32_t* row = (uint32_t*)(void*)(framebuffer_memory + ((size_t)y * framebuffer_pitch));
+        volatile uint32_t* row = (volatile uint32_t*)(framebuffer_memory + ((size_t)y * framebuffer_pitch));
         for (uint16_t x = 0; x < framebuffer_width; x++) {
             row[x] = color;
         }
@@ -156,7 +168,7 @@ static void video_try_initialize(const struct multiboot_info* mbi) {
         return;
     }
 
-    if (mode_info->bpp != 32u) {
+    if (mode_info->bpp != FRAMEBUFFER_REQUIRED_BPP) {
         framebuffer_reject_non_32bpp = 1;
         return;
     }
@@ -220,7 +232,7 @@ static void terminal_initialize(void) {
     terminal_row = 0;
     terminal_col = 0;
     terminal_color = vga_entry_color(15, 0);
-    vga_text_available = status_is_present(port_read_u8(PORT_VGA_STATUS));
+    vga_text_available = detect_vga_text_available();
     terminal_vga_enabled = !framebuffer_video_enabled && vga_text_available;
 
     if (terminal_vga_enabled) {
@@ -588,17 +600,15 @@ static void detect_drivers(void) {
     driver_status_push("PS/2 keyboard", PORT_PS2_STATUS, status_is_present(status));
 
     status = port_read_u8(PORT_PIT_COMMAND);
-    port_write_u8(PORT_PIT_COMMAND, PIT_MODE_SQUARE_WAVE);
-    port_write_u8(PORT_PIT_CHANNEL0, (uint8_t)(PIT_DIVISOR_APPROX_100HZ & 0xFFu));
-    port_write_u8(PORT_PIT_CHANNEL0, (uint8_t)(PIT_DIVISOR_APPROX_100HZ >> 8));
     driver_status_push("PIT timer", PORT_PIT_CHANNEL0, status_is_present(status));
 
     status = port_read_u8(PORT_COM1 + 5);
     driver_status_push("Serial COM1", PORT_COM1, status_is_present(status));
 
-    port_write_u8(PORT_CMOS_INDEX, CMOS_REG_STATUS_A);
+    port_write_u8(PORT_CMOS_INDEX, (uint8_t)(CMOS_NMI_DISABLE | CMOS_REG_STATUS_A));
     status = port_read_u8(PORT_CMOS_DATA);
     driver_status_push("CMOS RTC", PORT_CMOS_INDEX, status_is_present(status));
+    port_write_u8(PORT_CMOS_INDEX, CMOS_REG_STATUS_A);
 
     status = port_read_u8(PORT_ATA_PRIMARY_STATUS);
     driver_status_push("ATA primary", PORT_ATA_PRIMARY_BASE, status_is_present(status));
