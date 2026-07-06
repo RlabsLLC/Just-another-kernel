@@ -28,13 +28,177 @@ static inline void port_write_u8(uint16_t port, uint8_t value) {
     __asm__ volatile ("outb %0, %1" : : "a"(value), "dN"(port));
 }
 
+enum { DRIVER_STATUS_CAPACITY = 7 };
+
+static const uint16_t PORT_VGA_STATUS = 0x03DA;
+static const uint16_t PORT_PS2_STATUS = 0x0064;
+static const uint16_t PORT_PS2_DATA = 0x0060;
+static const uint16_t PORT_PIT_CHANNEL0 = 0x0040;
+static const uint16_t PORT_PIT_COMMAND = 0x0043;
+static const uint8_t PIT_MODE_SQUARE_WAVE = 0x36;
+static const uint16_t PIT_DIVISOR_APPROX_100HZ = 0x2E9C;
+static const uint16_t PORT_COM1 = 0x03F8;
+static const uint16_t PORT_CMOS_INDEX = 0x0070;
+static const uint16_t PORT_CMOS_DATA = 0x0071;
+static const uint8_t CMOS_REG_STATUS_A = 0x0A;
+static const uint16_t PORT_ATA_PRIMARY_BASE = 0x01F0;
+static const uint16_t PORT_ATA_PRIMARY_STATUS = 0x01F7;
+
+static uint8_t terminal_vga_enabled = 1;
+static uint8_t serial_console_enabled;
+static uint8_t framebuffer_video_enabled;
+
+static volatile uint8_t* framebuffer_memory;
+static uint16_t framebuffer_width;
+static uint16_t framebuffer_height;
+static uint16_t framebuffer_pitch;
+static uint8_t framebuffer_bpp;
+
+struct vbe_mode_info {
+    uint16_t attributes;
+    uint8_t win_a;
+    uint8_t win_b;
+    uint16_t granularity;
+    uint16_t winsize;
+    uint16_t segment_a;
+    uint16_t segment_b;
+    uint32_t real_fct_ptr;
+    uint16_t pitch;
+    uint16_t xres;
+    uint16_t yres;
+    uint8_t wchar;
+    uint8_t ychar;
+    uint8_t planes;
+    uint8_t bpp;
+    uint8_t banks;
+    uint8_t memory_model;
+    uint8_t bank_size;
+    uint8_t image_pages;
+    uint8_t reserved0;
+    uint8_t red_mask;
+    uint8_t red_position;
+    uint8_t green_mask;
+    uint8_t green_position;
+    uint8_t blue_mask;
+    uint8_t blue_position;
+    uint8_t rsv_mask;
+    uint8_t rsv_position;
+    uint8_t direct_color_attributes;
+    uint32_t framebuffer;
+    uint32_t offscreen_mem_off;
+    uint16_t offscreen_mem_size;
+} __attribute__((packed));
+
+struct multiboot_info {
+    uint32_t flags;
+    uint32_t mem_lower;
+    uint32_t mem_upper;
+    uint32_t boot_device;
+    uint32_t cmdline;
+    uint32_t mods_count;
+    uint32_t mods_addr;
+    uint32_t syms[4];
+    uint32_t mmap_length;
+    uint32_t mmap_addr;
+    uint32_t drives_length;
+    uint32_t drives_addr;
+    uint32_t config_table;
+    uint32_t boot_loader_name;
+    uint32_t apm_table;
+    uint32_t vbe_control_info;
+    uint32_t vbe_mode_info;
+    uint16_t vbe_mode;
+    uint16_t vbe_interface_seg;
+    uint16_t vbe_interface_off;
+    uint16_t vbe_interface_len;
+};
+
+static uint8_t status_is_present(uint8_t status) {
+    return status != 0xFFu;
+}
+
+static void framebuffer_clear(uint32_t rgb) {
+    if (!framebuffer_video_enabled || framebuffer_memory == 0 || framebuffer_bpp != 32u) {
+        return;
+    }
+
+    uint32_t color = rgb & 0x00FFFFFFu;
+    for (uint16_t y = 0; y < framebuffer_height; y++) {
+        uint32_t* row = (uint32_t*)(void*)(framebuffer_memory + ((size_t)y * framebuffer_pitch));
+        for (uint16_t x = 0; x < framebuffer_width; x++) {
+            row[x] = color;
+        }
+    }
+}
+
+static void video_try_initialize(const struct multiboot_info* mbi) {
+    framebuffer_video_enabled = 0;
+    framebuffer_memory = 0;
+    framebuffer_width = 0;
+    framebuffer_height = 0;
+    framebuffer_pitch = 0;
+    framebuffer_bpp = 0;
+
+    if ((mbi->flags & (1u << 11)) == 0 || mbi->vbe_mode_info == 0) {
+        return;
+    }
+
+    const struct vbe_mode_info* mode_info = (const struct vbe_mode_info*)(uintptr_t)mbi->vbe_mode_info;
+    if (mode_info->framebuffer == 0 || mode_info->xres == 0 || mode_info->yres == 0) {
+        return;
+    }
+
+    if (mode_info->bpp != 32u) {
+        return;
+    }
+
+    framebuffer_memory = (volatile uint8_t*)(uintptr_t)mode_info->framebuffer;
+    framebuffer_width = mode_info->xres;
+    framebuffer_height = mode_info->yres;
+    framebuffer_pitch = mode_info->pitch;
+    framebuffer_bpp = mode_info->bpp;
+    framebuffer_video_enabled = 1;
+    framebuffer_clear(0x000000u);
+}
+
+static void serial_try_initialize(void) {
+    port_write_u8(PORT_COM1 + 1, 0x00);
+    port_write_u8(PORT_COM1 + 3, 0x80);
+    port_write_u8(PORT_COM1 + 0, 0x03);
+    port_write_u8(PORT_COM1 + 1, 0x00);
+    port_write_u8(PORT_COM1 + 3, 0x03);
+    port_write_u8(PORT_COM1 + 2, 0xC7);
+    port_write_u8(PORT_COM1 + 4, 0x0B);
+    serial_console_enabled = (port_read_u8(PORT_COM1 + 5) != 0xFFu);
+}
+
+static void serial_putchar(char c) {
+    if (!serial_console_enabled) {
+        return;
+    }
+
+    for (size_t spin = 0; spin < 65535u; spin++) {
+        if ((port_read_u8(PORT_COM1 + 5) & 0x20u) != 0) {
+            port_write_u8(PORT_COM1 + 0, (uint8_t)c);
+            return;
+        }
+    }
+}
+
 static void terminal_clear_row(size_t row) {
+    if (!terminal_vga_enabled) {
+        return;
+    }
     for (size_t x = 0; x < VGA_WIDTH; x++) {
         VGA_MEMORY[row * VGA_WIDTH + x] = vga_entry(' ', terminal_color);
     }
 }
 
 static void terminal_scroll(void) {
+    if (!terminal_vga_enabled) {
+        return;
+    }
+
     for (size_t y = 1; y < VGA_HEIGHT; y++) {
         for (size_t x = 0; x < VGA_WIDTH; x++) {
             VGA_MEMORY[(y - 1) * VGA_WIDTH + x] = VGA_MEMORY[y * VGA_WIDTH + x];
@@ -47,13 +211,27 @@ static void terminal_initialize(void) {
     terminal_row = 0;
     terminal_col = 0;
     terminal_color = vga_entry_color(15, 0);
+    terminal_vga_enabled = !framebuffer_video_enabled && status_is_present(port_read_u8(PORT_VGA_STATUS));
 
-    for (size_t y = 0; y < VGA_HEIGHT; y++) {
-        terminal_clear_row(y);
+    if (terminal_vga_enabled) {
+        for (size_t y = 0; y < VGA_HEIGHT; y++) {
+            terminal_clear_row(y);
+        }
     }
 }
 
 static void terminal_putchar(char c) {
+    if (serial_console_enabled) {
+        if (c == '\n') {
+            serial_putchar('\r');
+        }
+        serial_putchar(c);
+    }
+
+    if (!terminal_vga_enabled) {
+        return;
+    }
+
     if (c == '\n') {
         terminal_col = 0;
         terminal_row++;
@@ -118,20 +296,6 @@ static char command_buffer[256];
 static size_t command_length;
 
 static const char* const KERNEL_PATCH_LABEL = "[Patch 26.4.1 - Bootable Universal]";
-enum { DRIVER_STATUS_CAPACITY = 6 };
-
-static const uint16_t PORT_VGA_STATUS = 0x03DA;
-static const uint16_t PORT_PS2_STATUS = 0x0064;
-static const uint16_t PORT_PS2_DATA = 0x0060;
-static const uint16_t PORT_PIT_CHANNEL0 = 0x0040;
-static const uint16_t PORT_PIT_COMMAND = 0x0043;
-static const uint8_t PIT_MODE_SQUARE_WAVE = 0x36;
-static const uint16_t PIT_DIVISOR_100HZ = 0x2E9B;
-static const uint16_t PORT_COM1 = 0x03F8;
-static const uint16_t PORT_CMOS_INDEX = 0x0070;
-static const uint16_t PORT_CMOS_DATA = 0x0071;
-static const uint8_t CMOS_REG_STATUS_A = 0x0A;
-static const uint16_t PORT_ATA_PRIMARY_STATUS = 0x01F7;
 
 struct driver_status {
     const char* name;
@@ -142,8 +306,12 @@ struct driver_status {
 static struct driver_status driver_statuses[DRIVER_STATUS_CAPACITY];
 static size_t driver_status_count;
 
-static uint8_t status_is_present(uint8_t status) {
-    return status != 0xFFu;
+static void driver_status_push(const char* name, uint16_t io_base, uint8_t ready) {
+    if (driver_status_count >= DRIVER_STATUS_CAPACITY) {
+        return;
+    }
+
+    driver_statuses[driver_status_count++] = (struct driver_status){ name, io_base, ready };
 }
 
 static const char scancode_map[128] = {
@@ -179,6 +347,10 @@ static const char scancode_map_shift[128] = {
 };
 
 static void terminal_backspace(void) {
+    if (!terminal_vga_enabled) {
+        return;
+    }
+
     if (terminal_col == 0) {
         if (terminal_row == 0) {
             return;
@@ -346,12 +518,6 @@ static void keyboard_handle_scancode(uint8_t scancode) {
     cli_handle_char(c);
 }
 
-struct multiboot_info {
-    uint32_t flags;
-    uint32_t mem_lower;
-    uint32_t mem_upper;
-};
-
 static void print_boot_info(uint32_t magic, const struct multiboot_info* mbi) {
     terminal_write("Multiboot magic: ");
     terminal_write_hex(magic);
@@ -377,6 +543,18 @@ static void print_boot_info(uint32_t magic, const struct multiboot_info* mbi) {
     } else {
         terminal_write("Memory fields unavailable.\n");
     }
+
+    if (framebuffer_video_enabled) {
+        terminal_write("Video driver: VBE framebuffer ");
+        terminal_write_uint(framebuffer_width);
+        terminal_write("x");
+        terminal_write_uint(framebuffer_height);
+        terminal_write("x");
+        terminal_write_uint(framebuffer_bpp);
+        terminal_putchar('\n');
+    } else {
+        terminal_write("Video driver: VGA text / serial fallback\n");
+    }
 }
 
 static void detect_drivers(void) {
@@ -384,37 +562,35 @@ static void detect_drivers(void) {
     driver_status_count = 0;
 
     status = port_read_u8(PORT_VGA_STATUS);
-    driver_statuses[driver_status_count++] = (struct driver_status){ "VGA text", PORT_VGA_STATUS, status_is_present(status) };
+    driver_status_push("VGA text", PORT_VGA_STATUS, status_is_present(status));
+
+    driver_status_push("VBE framebuffer", 0x0000, framebuffer_video_enabled);
 
     status = port_read_u8(PORT_PS2_STATUS);
-    driver_statuses[driver_status_count++] = (struct driver_status){ "PS/2 keyboard", PORT_PS2_STATUS, status_is_present(status) };
+    driver_status_push("PS/2 keyboard", PORT_PS2_STATUS, status_is_present(status));
 
     port_write_u8(PORT_PIT_COMMAND, PIT_MODE_SQUARE_WAVE);
-    port_write_u8(PORT_PIT_CHANNEL0, (uint8_t)(PIT_DIVISOR_100HZ & 0xFFu));
-    port_write_u8(PORT_PIT_CHANNEL0, (uint8_t)(PIT_DIVISOR_100HZ >> 8));
-    driver_statuses[driver_status_count++] = (struct driver_status){ "PIT timer", PORT_PIT_CHANNEL0, 1 };
+    port_write_u8(PORT_PIT_CHANNEL0, (uint8_t)(PIT_DIVISOR_APPROX_100HZ & 0xFFu));
+    port_write_u8(PORT_PIT_CHANNEL0, (uint8_t)(PIT_DIVISOR_APPROX_100HZ >> 8));
+    driver_status_push("PIT timer", PORT_PIT_CHANNEL0, 1);
 
-    port_write_u8(PORT_COM1 + 1, 0x00);
-    port_write_u8(PORT_COM1 + 3, 0x80);
-    port_write_u8(PORT_COM1 + 0, 0x03);
-    port_write_u8(PORT_COM1 + 1, 0x00);
-    port_write_u8(PORT_COM1 + 3, 0x03);
-    port_write_u8(PORT_COM1 + 2, 0xC7);
-    port_write_u8(PORT_COM1 + 4, 0x0B);
+    serial_try_initialize();
     status = port_read_u8(PORT_COM1 + 5);
-    driver_statuses[driver_status_count++] = (struct driver_status){ "Serial COM1", PORT_COM1, status_is_present(status) };
+    driver_status_push("Serial COM1", PORT_COM1, status_is_present(status));
 
     port_write_u8(PORT_CMOS_INDEX, CMOS_REG_STATUS_A);
     status = port_read_u8(PORT_CMOS_DATA);
-    driver_statuses[driver_status_count++] = (struct driver_status){ "CMOS RTC", PORT_CMOS_INDEX, status_is_present(status) };
+    driver_status_push("CMOS RTC", PORT_CMOS_INDEX, status_is_present(status));
 
     status = port_read_u8(PORT_ATA_PRIMARY_STATUS);
-    driver_statuses[driver_status_count++] = (struct driver_status){ "ATA primary", 0x01F0, status_is_present(status) };
+    driver_status_push("ATA primary", PORT_ATA_PRIMARY_BASE, status_is_present(status));
 }
 
 void kernel_main(uint32_t magic, uint32_t multiboot_info_addr) {
     const struct multiboot_info* mbi = (const struct multiboot_info*)(uintptr_t)multiboot_info_addr;
 
+    serial_try_initialize();
+    video_try_initialize(mbi);
     terminal_initialize();
     terminal_write("Custom C kernel booted.\n");
     terminal_write(KERNEL_PATCH_LABEL);
