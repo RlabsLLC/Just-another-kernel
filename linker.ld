@@ -3,12 +3,17 @@ OUTPUT_FORMAT(elf32-i386)
 
 SECTIONS
 {
+    .note.Xen :
+    {
+        *(.note.Xen)
+    }
+
+    . = 1M;
+
     .multiboot :
     {
         KEEP(*(.multiboot))
     }
-
-    . = 1M;
 
     .text :
     {
