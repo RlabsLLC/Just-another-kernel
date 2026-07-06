@@ -309,21 +309,47 @@ static void terminal_write_uint(uint32_t value) {
 }
 
 static void terminal_write_uint64(uint64_t value) {
-    char buffer[20];
-    size_t i = 0;
+    static const uint64_t powers_of_10[] = {
+        10000000000000000000ULL,
+        1000000000000000000ULL,
+        100000000000000000ULL,
+        10000000000000000ULL,
+        1000000000000000ULL,
+        100000000000000ULL,
+        10000000000000ULL,
+        1000000000000ULL,
+        100000000000ULL,
+        10000000000ULL,
+        1000000000ULL,
+        100000000ULL,
+        10000000ULL,
+        1000000ULL,
+        100000ULL,
+        10000ULL,
+        1000ULL,
+        100ULL,
+        10ULL,
+        1ULL,
+    };
+    uint8_t wrote_digit = 0;
 
     if (value == 0) {
         terminal_putchar('0');
         return;
     }
 
-    while (value > 0) {
-        buffer[i++] = (char)('0' + (value % 10));
-        value /= 10;
-    }
+    for (size_t i = 0; i < (sizeof(powers_of_10) / sizeof(powers_of_10[0])); i++) {
+        uint8_t digit = 0;
 
-    while (i > 0) {
-        terminal_putchar(buffer[--i]);
+        while (value >= powers_of_10[i]) {
+            value -= powers_of_10[i];
+            digit++;
+        }
+
+        if (digit != 0 || wrote_digit) {
+            terminal_putchar((char)('0' + digit));
+            wrote_digit = 1;
+        }
     }
 }
 
