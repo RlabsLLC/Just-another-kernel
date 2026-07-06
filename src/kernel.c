@@ -309,6 +309,7 @@ static void terminal_write_uint(uint32_t value) {
 }
 
 static void terminal_write_uint64(uint64_t value) {
+    /* 10^19 through 10^0, used to emit decimal digits without 64-bit division. */
     static const uint64_t powers_of_10[] = {
         0x8AC7230489E80000ULL,
         0x0DE0B6B3A7640000ULL,

@@ -31,7 +31,7 @@ SECTIONS
         *(.rodata*)
     } :text
 
-    . = ALIGN(4096);
+    . = ALIGN(4096); /* Separate RX and RW PT_LOAD segments on a page boundary. */
 
     .data :
     {
