@@ -1,4 +1,4 @@
-/* PVH ELF note – required by QEMU 5+ to boot an uncompressed ELF kernel
+/* PVH ELF note - required by QEMU 5+ to boot an uncompressed ELF kernel
  * directly via the -kernel flag (XEN_ELFNOTE_PHYS32_ENTRY = 18).
  */
 .section .note.Xen, "a"
