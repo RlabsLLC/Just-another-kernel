@@ -43,10 +43,13 @@ static const uint16_t PORT_CMOS_DATA = 0x0071;
 static const uint8_t CMOS_REG_STATUS_A = 0x0A;
 static const uint16_t PORT_ATA_PRIMARY_BASE = 0x01F0;
 static const uint16_t PORT_ATA_PRIMARY_STATUS = 0x01F7;
+static const uint16_t PORT_NOT_APPLICABLE = 0xFFFF;
+static const size_t SERIAL_TRANSMIT_MAX_RETRIES = 65535u;
 
 static uint8_t terminal_vga_enabled = 1;
 static uint8_t serial_console_enabled;
 static uint8_t framebuffer_video_enabled;
+static uint8_t vga_text_available;
 
 static volatile uint8_t* framebuffer_memory;
 static uint16_t framebuffer_width;
@@ -177,7 +180,7 @@ static void serial_putchar(char c) {
         return;
     }
 
-    for (size_t spin = 0; spin < 65535u; spin++) {
+    for (size_t spin = 0; spin < SERIAL_TRANSMIT_MAX_RETRIES; spin++) {
         if ((port_read_u8(PORT_COM1 + 5) & 0x20u) != 0) {
             port_write_u8(PORT_COM1 + 0, (uint8_t)c);
             return;
@@ -211,7 +214,8 @@ static void terminal_initialize(void) {
     terminal_row = 0;
     terminal_col = 0;
     terminal_color = vga_entry_color(15, 0);
-    terminal_vga_enabled = !framebuffer_video_enabled && status_is_present(port_read_u8(PORT_VGA_STATUS));
+    vga_text_available = status_is_present(port_read_u8(PORT_VGA_STATUS));
+    terminal_vga_enabled = !framebuffer_video_enabled && vga_text_available;
 
     if (terminal_vga_enabled) {
         for (size_t y = 0; y < VGA_HEIGHT; y++) {
@@ -561,10 +565,9 @@ static void detect_drivers(void) {
     uint8_t status;
     driver_status_count = 0;
 
-    status = port_read_u8(PORT_VGA_STATUS);
-    driver_status_push("VGA text", PORT_VGA_STATUS, status_is_present(status));
+    driver_status_push("VGA text", PORT_VGA_STATUS, vga_text_available);
 
-    driver_status_push("VBE framebuffer", 0x0000, framebuffer_video_enabled);
+    driver_status_push("VBE framebuffer", PORT_NOT_APPLICABLE, framebuffer_video_enabled);
 
     status = port_read_u8(PORT_PS2_STATUS);
     driver_status_push("PS/2 keyboard", PORT_PS2_STATUS, status_is_present(status));
