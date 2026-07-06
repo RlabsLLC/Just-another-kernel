@@ -18,6 +18,12 @@ static inline uint16_t vga_entry(unsigned char uc, uint8_t color) {
     return (uint16_t)uc | (uint16_t)color << 8;
 }
 
+static inline uint8_t port_read_u8(uint16_t port) {
+    uint8_t value;
+    __asm__ volatile ("inb %1, %0" : "=a"(value) : "dN"(port));
+    return value;
+}
+
 static void terminal_clear_row(size_t row) {
     for (size_t x = 0; x < VGA_WIDTH; x++) {
         VGA_MEMORY[row * VGA_WIDTH + x] = vga_entry(' ', terminal_color);
@@ -99,12 +105,6 @@ static void terminal_write_hex(uint32_t value) {
     for (int shift = 28; shift >= 0; shift -= 4) {
         terminal_putchar(digits[(value >> shift) & 0xF]);
     }
-}
-
-static inline uint8_t port_read_u8(uint16_t port) {
-    uint8_t value;
-    __asm__ volatile ("inb %1, %0" : "=a"(value) : "dN"(port));
-    return value;
 }
 
 static uint8_t keyboard_shift_held;

@@ -10,12 +10,16 @@ else
 TARGET_FLAGS := -m32
 endif
 
-ifeq ($(shell command -v $(KERNEL_LD) >/dev/null 2>&1; echo $$?),1)
-ifneq ($(shell command -v ld.lld >/dev/null 2>&1; echo $$?),1)
+ifeq ($(shell if command -v $(KERNEL_LD) >/dev/null 2>&1; then echo 0; else echo 1; fi),1)
+ifeq ($(shell if command -v ld.lld >/dev/null 2>&1; then echo 0; else echo 1; fi),0)
 KERNEL_LD := ld.lld
+else
+ifeq ($(shell if command -v ld >/dev/null 2>&1; then echo 0; else echo 1; fi),0)
+KERNEL_LD := ld
 else
 ifneq ($(wildcard $(ZIG)),)
 KERNEL_LD := $(ZIG) ld.lld
+endif
 endif
 endif
 endif
