@@ -30,7 +30,9 @@ Running *directly* on the hardware
 3. Flash a USB (minimum 1GB) with the ISO.
 4. Plug in your computer
 5. Restart the computer and select the USB as boot device
+
 *Note:* TPM could block the kernel, so you may need to disable TPM in the BIOS.
+
 6. Now you are in the kernel!
 
 Using Qemu for emulation (the hardest way)
@@ -39,7 +41,9 @@ Using Qemu for emulation (the hardest way)
 1. clone or download repository zip (recomended to download zip from the release page)
 2. chmod the `./run-kernel.sh` file
 3. execute `./run-kernel.sh` and install any dependencies requested by the script.
+
 *Note:* This will compile it on the spot, then load it into Qemu.
+
 4. Wait for the command prompt to pull up a Qemu Window.
 5. If any bugs happen in the kernel/build, report them please.
 6. You are now in the Qemu Emulator with the kernel.
