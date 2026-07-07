@@ -53,6 +53,8 @@ launch_host_bash() {
     printf 'JAK_ROOT=%q\n' "$ROOT_DIR" > "$rc_file"
 
     cat >> "$rc_file" <<'EOF'
+set +e
+
 kernel-build() {
     (cd "$JAK_ROOT" && make "$@")
 }
@@ -65,8 +67,40 @@ kernel-clean() {
     (cd "$JAK_ROOT" && make clean)
 }
 
+rtsi() {
+    (cd "$JAK_ROOT" && bash "$JAK_ROOT/rtsi.sh" "$@") &
+    JAK_RTSI_PID=$!
+    JAK_RTSI_PID_FILE="${TMPDIR:-/tmp}/jak-rtsi.pid"
+    printf '%s\n' "$JAK_RTSI_PID" > "$JAK_RTSI_PID_FILE"
+    printf '[rtsi] started PID %s\n' "$JAK_RTSI_PID"
+}
+
+pkill() {
+    if [[ $# -eq 0 ]]; then
+        if [[ -n "${JAK_RTSI_PID:-}" ]] && kill -0 "$JAK_RTSI_PID" >/dev/null 2>&1; then
+            kill "$JAK_RTSI_PID" >/dev/null 2>&1 || true
+            wait "$JAK_RTSI_PID" >/dev/null 2>&1 || true
+            unset JAK_RTSI_PID
+            return 0
+        fi
+
+        if [[ -f "${JAK_RTSI_PID_FILE:-}" ]]; then
+            local running_pid
+            running_pid="$(cat "$JAK_RTSI_PID_FILE" 2>/dev/null || true)"
+            if [[ -n "$running_pid" ]]; then
+                kill "$running_pid" >/dev/null 2>&1 || true
+            fi
+        fi
+
+        return 0
+    fi
+
+    command pkill "$@"
+}
+
 printf 'JAK GNU Bash shell ready.\n'
 printf 'Helpers: kernel-build, kernel-run, kernel-clean\n'
+printf 'Helpers: rtsi, pkill\n'
 printf 'Project root: %s\n' "$JAK_ROOT"
 PS1='jak-bash$ '
 EOF

@@ -1,6 +1,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "kernel_utils.h"
+#include "yBash.h"
+
 static const size_t VGA_WIDTH = 80;
 static const size_t VGA_HEIGHT = 25;
 
@@ -46,26 +49,26 @@ static const uint16_t PORT_ATA_PRIMARY_STATUS = 0x01F7;
 static const uint16_t PORT_NOT_APPLICABLE = 0xFFFF;
 static const size_t SERIAL_TRANSMIT_MAX_RETRIES = 8192u;
 static const uint8_t FRAMEBUFFER_REQUIRED_BPP = 32u;
-static const char* const KERNEL_PATCH_VERSION = "26.4.1";
-static const char* const KERNEL_PATCH_LABEL = "[Patch 26.4.1 - Bootable Universal]";
+const char* const KERNEL_PATCH_VERSION = "26.4.1";
+const char* const KERNEL_PATCH_LABEL = "[Patch 26.4.1 - Bootable Universal]";
 
-static uint8_t terminal_vga_enabled = 1;
-static uint8_t serial_console_enabled;
-static uint8_t framebuffer_video_enabled;
-static uint8_t vga_text_available;
-static uint8_t driver_status_overflowed;
-static uint8_t framebuffer_reject_non_32bpp;
+uint8_t terminal_vga_enabled = 1;
+uint8_t serial_console_enabled;
+uint8_t framebuffer_video_enabled;
+uint8_t vga_text_available;
+uint8_t driver_status_overflowed;
+uint8_t framebuffer_reject_non_32bpp;
 
-static volatile uint8_t* framebuffer_memory;
-static uint16_t framebuffer_width;
-static uint16_t framebuffer_height;
-static uint16_t framebuffer_pitch;
-static uint8_t framebuffer_bpp;
+volatile uint8_t* framebuffer_memory;
+uint16_t framebuffer_width;
+uint16_t framebuffer_height;
+uint16_t framebuffer_pitch;
+uint8_t framebuffer_bpp;
 
 struct multiboot_info;
 
-static const struct multiboot_info* boot_mbi;
-static uint64_t kernel_poll_ticks;
+const struct multiboot_info* boot_mbi;
+uint32_t kernel_poll_ticks;
 
 struct vbe_mode_info {
     uint16_t attributes;
@@ -234,7 +237,7 @@ static void terminal_scroll(void) {
     terminal_clear_row(VGA_HEIGHT - 1);
 }
 
-static void terminal_initialize(void) {
+void terminal_initialize(void) {
     terminal_row = 0;
     terminal_col = 0;
     terminal_color = vga_entry_color(15, 0);
@@ -248,7 +251,7 @@ static void terminal_initialize(void) {
     }
 }
 
-static void terminal_putchar(char c) {
+void terminal_putchar(char c) {
     if (serial_console_enabled) {
         if (c == '\n') {
             serial_putchar('\r');
@@ -283,56 +286,9 @@ static void terminal_putchar(char c) {
     }
 }
 
-static void terminal_write(const char* data) {
+void terminal_write(const char* data) {
     for (size_t i = 0; data[i] != '\0'; i++) {
         terminal_putchar(data[i]);
-    }
-}
-
-static void terminal_write_uint(uint32_t value) {
-    char buffer[10];
-    size_t i = 0;
-
-    if (value == 0) {
-        terminal_putchar('0');
-        return;
-    }
-
-    while (value > 0) {
-        buffer[i++] = (char)('0' + (value % 10));
-        value /= 10;
-    }
-
-    while (i > 0) {
-        terminal_putchar(buffer[--i]);
-    }
-}
-
-static void terminal_write_uint64(uint64_t value) {
-    char buffer[20];
-    size_t i = 0;
-
-    if (value == 0) {
-        terminal_putchar('0');
-        return;
-    }
-
-    while (value > 0) {
-        buffer[i++] = (char)('0' + (value % 10));
-        value /= 10;
-    }
-
-    while (i > 0) {
-        terminal_putchar(buffer[--i]);
-    }
-}
-
-static void terminal_write_hex(uint32_t value) {
-    const char* digits = "0123456789ABCDEF";
-    terminal_write("0x");
-
-    for (int shift = 28; shift >= 0; shift -= 4) {
-        terminal_putchar(digits[(value >> shift) & 0xF]);
     }
 }
 
@@ -348,8 +304,8 @@ struct driver_status {
     uint8_t ready;
 };
 
-static struct driver_status driver_statuses[DRIVER_STATUS_CAPACITY];
-static size_t driver_status_count;
+struct driver_status driver_statuses[DRIVER_STATUS_CAPACITY];
+size_t driver_status_count;
 
 static void driver_status_push(const char* name, uint16_t io_base, uint8_t ready) {
     if (driver_status_count >= DRIVER_STATUS_CAPACITY) {
@@ -409,28 +365,6 @@ static void terminal_backspace(void) {
     VGA_MEMORY[terminal_row * VGA_WIDTH + terminal_col] = vga_entry(' ', terminal_color);
 }
 
-static int streq(const char* a, const char* b) {
-    size_t i = 0;
-    while (a[i] != '\0' && b[i] != '\0') {
-        if (a[i] != b[i]) {
-            return 0;
-        }
-        i++;
-    }
-    return a[i] == b[i];
-}
-
-static int starts_with(const char* text, const char* prefix) {
-    size_t i = 0;
-    while (prefix[i] != '\0') {
-        if (text[i] != prefix[i]) {
-            return 0;
-        }
-        i++;
-    }
-    return 1;
-}
-
 static void cli_prompt(void) {
     terminal_write("> ");
 }
@@ -456,11 +390,10 @@ static void cli_command_help(void) {
 }
 
 static void cli_command_about(void) {
-    terminal_write("Kernel: Custom Minimal C Kernel\n");
+    terminal_write("Yet Another Kernel\n");
     terminal_write("Patch: ");
     terminal_write(KERNEL_PATCH_LABEL);
     terminal_putchar('\n');
-    terminal_write("Architecture: i386 freestanding (Multiboot)\n");
 }
 
 static void cli_command_mem(void) {
@@ -510,12 +443,12 @@ static void cli_command_serial(void) {
 
 static void cli_command_uptime(void) {
     terminal_write("Kernel poll ticks: ");
-    terminal_write_uint64(kernel_poll_ticks);
+    terminal_write_uint(kernel_poll_ticks);
     terminal_putchar('\n');
 }
 
 static void cli_command_halt(void) {
-    terminal_write("CPU halted. Reset VM to continue.\n");
+    terminal_write("CPU halted. Reset/Restart to continue.\n");
     for (;;) {
         __asm__ volatile ("hlt");
     }
@@ -547,32 +480,32 @@ static void cli_execute_command(void) {
         return;
     }
 
-    if (streq(command_buffer, "help")) {
+    if (kernel_streq(command_buffer, "help")) {
         cli_command_help();
         cli_prompt();
         return;
     }
 
-    if (streq(command_buffer, "clear")) {
+    if (kernel_streq(command_buffer, "clear")) {
         terminal_initialize();
         cli_prompt();
         return;
     }
 
-    if (starts_with(command_buffer, "echo ")) {
+    if (kernel_starts_with(command_buffer, "echo ")) {
         terminal_write(command_buffer + 5);
         terminal_putchar('\n');
         cli_prompt();
         return;
     }
 
-    if (streq(command_buffer, "drivers")) {
+    if (kernel_streq(command_buffer, "drivers")) {
         print_driver_statuses();
         cli_prompt();
         return;
     }
 
-    if (streq(command_buffer, "version")) {
+    if (kernel_streq(command_buffer, "version")) {
         terminal_write("Version ");
         terminal_write(KERNEL_PATCH_VERSION);
         terminal_write(" ");
@@ -582,48 +515,48 @@ static void cli_execute_command(void) {
         return;
     }
 
-    if (streq(command_buffer, "about")) {
+    if (kernel_streq(command_buffer, "about")) {
         cli_command_about();
         cli_prompt();
         return;
     }
 
-    if (streq(command_buffer, "mem")) {
+    if (kernel_streq(command_buffer, "mem")) {
         cli_command_mem();
         cli_prompt();
         return;
     }
 
-    if (streq(command_buffer, "video")) {
+    if (kernel_streq(command_buffer, "video")) {
         cli_command_video();
         cli_prompt();
         return;
     }
 
-    if (streq(command_buffer, "serial")) {
+    if (kernel_streq(command_buffer, "serial")) {
         cli_command_serial();
         cli_prompt();
         return;
     }
 
-    if (streq(command_buffer, "uptime")) {
+    if (kernel_streq(command_buffer, "uptime")) {
         cli_command_uptime();
         cli_prompt();
         return;
     }
 
-    if (streq(command_buffer, "halt")) {
+    if (kernel_streq(command_buffer, "halt")) {
         cli_command_halt();
         return;
     }
 
-    if (streq(command_buffer, "reboot")) {
+    if (kernel_streq(command_buffer, "reboot")) {
         cli_command_reboot();
         cli_prompt();
         return;
     }
 
-    if (streq(command_buffer, "bash")) {
+    if (kernel_streq(command_buffer, "bash")) {
         cli_command_bash();
         cli_prompt();
         return;
@@ -664,7 +597,7 @@ static void cli_handle_char(char c) {
     terminal_putchar(c);
 }
 
-static uint8_t keyboard_poll_scancode(void) {
+uint8_t keyboard_poll_scancode(void) {
     if ((port_read_u8(PORT_PS2_STATUS) & 0x01u) == 0) {
         return 0;
     }
@@ -672,7 +605,7 @@ static uint8_t keyboard_poll_scancode(void) {
     return port_read_u8(PORT_PS2_DATA);
 }
 
-static void keyboard_handle_scancode(uint8_t scancode) {
+static void __attribute__((unused)) keyboard_handle_scancode(uint8_t scancode) {
     if (scancode == 0xE0) {
         keyboard_extended_prefix = 1;
         return;
@@ -792,15 +725,6 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_addr) {
     detect_drivers();
     print_driver_statuses();
     terminal_write("Keyboard input mode: polling.\n");
-    cli_prompt();
 
-    for (;;) {
-        kernel_poll_ticks++;
-        uint8_t scancode = keyboard_poll_scancode();
-        if (scancode != 0) {
-            keyboard_handle_scancode(scancode);
-        }
-
-        __asm__ volatile ("pause");
-    }
+    yBash_start(magic, mbi);
 }
