@@ -11,15 +11,50 @@
 
 .set ALIGN,    1<<0
 .set MEMINFO,  1<<1
-.set FLAGS,    ALIGN | MEMINFO
+.set VIDEO,    1<<2
+.set FLAGS,    ALIGN | MEMINFO | VIDEO
 .set MAGIC,    0x1BADB002
 .set CHECKSUM, -(MAGIC + FLAGS)
+
+.set MB2_MAGIC,   0xE85250D6
+.set MB2_ARCH,    0
+.set MB2_LEN,     mb2_header_end - mb2_header_start
+.set MB2_CHECKSUM, -(MB2_MAGIC + MB2_ARCH + MB2_LEN)
 
 .section .multiboot,"a"
 .align 4
 .long MAGIC
 .long FLAGS
 .long CHECKSUM
+.long 0           /* mode_type: linear graphics */
+.long 1024        /* width */
+.long 768         /* height */
+.long 32          /* depth */
+
+.section .multiboot2,"a"
+.align 8
+mb2_header_start:
+.long MB2_MAGIC
+.long MB2_ARCH
+.long MB2_LEN
+.long MB2_CHECKSUM
+
+/* Framebuffer request tag */
+.short 5
+.short 0
+.long 20
+.long 1024
+.long 768
+.long 32
+
+/* Multiboot2 tags must be 8-byte aligned. */
+.align 8
+
+/* End tag */
+.short 0
+.short 0
+.long 8
+mb2_header_end:
 
 .section .text
 .global _start

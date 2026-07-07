@@ -215,7 +215,11 @@ set default=0
 # Prefer graphical terminal on firmware that lacks legacy text console.
 if loadfont /boot/grub/fonts/unicode.pf2; then
     insmod all_video
+    insmod vbe
+    insmod video_bochs
+    insmod video_cirrus
     insmod gfxterm
+    set gfxmode=1024x768x32,1024x768x24,1024x768x16,auto
     terminal_output gfxterm
 else
     terminal_output console
@@ -227,9 +231,14 @@ terminal_input --append console
 terminal_input --append serial
 
 menuentry "Just another kernel" {
-    set gfxpayload=keep
+    set gfxpayload=1024x768x32,1024x768x24,1024x768x16,keep
     insmod multiboot
-    multiboot /boot/kernel.elf
+    insmod multiboot2
+
+    if ! multiboot2 /boot/kernel.elf; then
+        multiboot /boot/kernel.elf
+    fi
+
     boot
 }
 EOF
@@ -263,6 +272,7 @@ main() {
 
     exec "$qemu_bin" \
         -m 1G \
+        -vga std \
         -cdrom "$BOOT_ISO" \
         -boot d \
         -no-reboot \

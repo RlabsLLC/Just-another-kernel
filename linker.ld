@@ -8,12 +8,17 @@ SECTIONS
         *(.note.Xen)
     }
 
-    . = 1M;
-
     .multiboot :
     {
         KEEP(*(.multiboot))
     }
+
+    .multiboot2 :
+    {
+        KEEP(*(.multiboot2))
+    }
+
+    . = 1M;
 
     .text :
     {

@@ -11,6 +11,7 @@ enum { YBASH_CONTENT_CAPACITY = 1024 };
 
 static const uint16_t PORT_PS2_STATUS = 0x0064;
 static const uint16_t PORT_KEYBOARD_COMMAND = 0x0064;
+static const uint16_t PORT_COM1 = 0x03F8;
 
 struct multiboot_info {
     uint32_t flags;
@@ -84,6 +85,20 @@ static inline uint8_t port_read_u8(uint16_t port) {
 
 static inline void port_write_u8(uint16_t port, uint8_t value) {
     __asm__ volatile ("outb %0, %1" : : "a"(value), "dN"(port));
+}
+
+static uint8_t ybash_poll_serial_char(char* out_char) {
+    if (!serial_console_enabled) {
+        return 0;
+    }
+
+    uint8_t line_status = port_read_u8(PORT_COM1 + 5);
+    if (line_status == 0xFFu || (line_status & 0x01u) == 0) {
+        return 0;
+    }
+
+    *out_char = (char)port_read_u8(PORT_COM1 + 0);
+    return 1;
 }
 
 static void ybash_prompt(void) {
@@ -677,6 +692,18 @@ void yBash_start(uint32_t magic, const struct multiboot_info* mbi) {
 
     for (;;) {
         kernel_poll_ticks++;
+
+        char serial_char;
+        if (ybash_poll_serial_char(&serial_char)) {
+            if (serial_char == '\r') {
+                ybash_handle_char('\n');
+            } else if (serial_char == 0x7Fu) {
+                ybash_handle_char('\b');
+            } else {
+                ybash_handle_char(serial_char);
+            }
+        }
+
         uint8_t scancode = keyboard_poll_scancode();
         if (scancode != 0) {
             ybash_handle_scancode(scancode);
