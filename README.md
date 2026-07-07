@@ -39,8 +39,9 @@ This Makefile links using `KERNEL_LD` (defaults to `i686-elf-ld`).
 
 Fallback order when `i686-elf-ld` is missing:
 
-1. `ld.lld` from `PATH`
-2. `tools/zig/zig ld.lld` (if `tools/zig/zig` exists)
+1. `x86_64-elf-ld` from `PATH`
+2. `ld.lld` from `PATH`
+3. `tools/zig/zig ld.lld` (if `tools/zig/zig` exists)
 
 You can still override it manually:
 
@@ -79,3 +80,7 @@ This opens an interactive GNU Bash session on the host with helper commands:
 - `kernel-build`
 - `kernel-run`
 - `kernel-clean`
+- `rtsi <file.c>`
+- `pkill`
+
+The `rtsi.sh` helper compiles a local `.c` file to a temporary binary and runs it.
