@@ -1,86 +1,47 @@
-# Custom Minimal C Kernel [Patch 26.4.1 - Bootable Universal]
+# Just Another Kernel 26.5.1
 
-This is a minimal educational x86 kernel written in C with:
+This is a kernel completly built with vibe coding with GPT-5.3-codex and other models.
 
-- A Multiboot-compliant entry point
-- VGA text-mode terminal output
-- Basic newline handling and screen scroll
-- Driver probing with graceful fallback for common x86 devices (VGA, PS/2 keyboard, PIT, COM1 serial, CMOS RTC, ATA)
-- Video driver selection with VBE framebuffer support (for systems without VGA text mode) and serial fallback
-- An interactive kernel CLI with commands for diagnostics and control
-- A host-side GNU Bash helper mode (`./run-kernel.sh --bash`) for build/run workflows
+### This patch includes:
+- A working terminal with commands
+- A virtual FS in the RAM
+- Custom VGA drivers that work in most places
+- Near instant boot
+- GRUB
 
-## Build
+### Fixed Bugs (from 26.5a)
+- Keyboard Puller fixed
+- Rendering in VGA mode is fixed
+- Backspace doing "? ?" has been fixed
+- Other bugfixes.
+---
+# How to run
 
-```sh
-make
-```
+Simplist way is to go to https://copy.sh/v86/ then
+1. Copy exact .iso file from the build/ folder
+2. Place it in the Custom CD Image (ISO) upload button
+3. Press "Start Emulation"
 
-Output:
+## Other ways to run
 
-- `build/kernel.elf`
+Running *directly* on the hardware
+1. Copy exact .iso file from the build/ folder
+2. Depending on your operating system, get an ISO flasher.
+3. Flash a USB (minimum 1GB) with the ISO.
+4. Plug in your computer
+5. Restart the computer and select the USB as boot device
+*Note:* TPM could block the kernel, so you may need to disable TPM in the BIOS.
+6. Now you are in the kernel!
 
-## Notes for macOS
+Using Qemu for emulation (the hardest way)
 
-To compile this kernel on macOS, install Apple Command Line Tools first:
+#### LINUX RECOMENDED!!
+1. clone or download repository zip (recomended to download zip from the release page)
+2. chmod the `./run-kernel.sh` file
+3. execute `./run-kernel.sh` and install any dependencies requested by the script.
+*Note:* This will compile it on the spot, then load it into Qemu.
+4. Wait for the command prompt to pull up a Qemu Window.
+5. If any bugs happen in the kernel/build, report them please.
+6. You are now in the Qemu Emulator with the kernel.
 
-```sh
-xcode-select --install
-```
-
-You also need an ELF-capable linker.
-
-Recommended:
-
-- `i686-elf-gcc` and `i686-elf-ld`
-- or Clang with `ld.lld`
-
-This Makefile links using `KERNEL_LD` (defaults to `i686-elf-ld`).
-
-Fallback order when `i686-elf-ld` is missing:
-
-1. `x86_64-elf-ld` from `PATH`
-2. `ld.lld` from `PATH`
-3. `tools/zig/zig ld.lld` (if `tools/zig/zig` exists)
-
-You can still override it manually:
-
-```sh
-make KERNEL_LD=ld.lld
-```
-
-## Kernel CLI Commands
-
-At the `> ` prompt, use:
-
-- `help`
-- `clear`
-- `echo <text>`
-- `drivers`
-- `version`
-- `about`
-- `mem`
-- `video`
-- `serial`
-- `uptime`
-- `halt`
-- `reboot`
-- `bash` (prints how to use host GNU Bash mode)
-
-## GNU Bash Mode
-
-Run:
-
-```sh
-./run-kernel.sh --bash
-```
-
-This opens an interactive GNU Bash session on the host with helper commands:
-
-- `kernel-build`
-- `kernel-run`
-- `kernel-clean`
-- `rtsi <file.c>`
-- `pkill`
-
-The `rtsi.sh` helper compiles a local `.c` file to a temporary binary and runs it.
+Any recomendations and feedback is welcome. This project is free to copy.
