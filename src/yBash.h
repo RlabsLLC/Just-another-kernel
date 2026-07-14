@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-struct multiboot_info;
+#include "Drivers/DriverState.h"
 
 uint8_t keyboard_poll_scancode(void);
 void yBash_start(uint32_t magic, const struct multiboot_info* mbi);

@@ -28,14 +28,14 @@ endif
 endif
 endif
 
-CFLAGS := $(TARGET_FLAGS) -ffreestanding -fno-stack-protector -fno-pic -O2 -Wall -Wextra
+CFLAGS := $(TARGET_FLAGS) -Isrc -ffreestanding -fno-stack-protector -fno-pic -O2 -Wall -Wextra
 ASFLAGS := $(TARGET_FLAGS) -ffreestanding
 LDFLAGS := -m elf_i386 -T linker.ld --build-id=none
 
 BUILD_DIR := build
 SRC_DIR := src
 
-OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/kernel_text.o $(BUILD_DIR)/kernel_format.o $(BUILD_DIR)/yBash.o
+OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/kernel_text.o $(BUILD_DIR)/kernel_format.o $(BUILD_DIR)/yBash.o $(BUILD_DIR)/terminal_driver_legacy.o $(BUILD_DIR)/virtualfs.o
 
 .PHONY: all clean
 
@@ -58,6 +58,12 @@ $(BUILD_DIR)/kernel_format.o: $(SRC_DIR)/kernel_format.c | $(BUILD_DIR)
 
 $(BUILD_DIR)/yBash.o: $(SRC_DIR)/yBash.C | $(BUILD_DIR)
 	$(CC) -x c $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/terminal_driver_legacy.o: $(SRC_DIR)/Drivers/Legacy/TerminalDriver.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/virtualfs.o: $(SRC_DIR)/Drivers/Latest/VirtualFS.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/kernel.elf: $(OBJS) linker.ld
 	@$(KERNEL_LD) --version >/dev/null 2>&1 || { \

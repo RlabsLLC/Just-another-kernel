@@ -1,105 +1,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "Drivers/DriverState.h"
+#include "Drivers/Legacy/TerminalDriver.h"
+#include "Drivers/Latest/VirtualFS.h"
 #include "kernel_utils.h"
 #include "yBash.h"
 
-enum { DRIVER_STATUS_CAPACITY = 7 };
-enum { YBASH_ENTRY_CAPACITY = 16 };
-enum { YBASH_NAME_CAPACITY = 64 };
-enum { YBASH_CONTENT_CAPACITY = 1024 };
-
-static const uint16_t PORT_PS2_STATUS = 0x0064;
-static const uint16_t PORT_KEYBOARD_COMMAND = 0x0064;
-static const uint16_t PORT_COM1 = 0x03F8;
-
-struct multiboot_info {
-    uint32_t flags;
-    uint32_t mem_lower;
-    uint32_t mem_upper;
-    uint32_t boot_device;
-    uint32_t cmdline;
-    uint32_t mods_count;
-    uint32_t mods_addr;
-    uint32_t syms[4];
-    uint32_t mmap_length;
-    uint32_t mmap_addr;
-    uint32_t drives_length;
-    uint32_t drives_addr;
-    uint32_t config_table;
-    uint32_t boot_loader_name;
-    uint32_t apm_table;
-    uint32_t vbe_control_info;
-    uint32_t vbe_mode_info;
-    uint16_t vbe_mode;
-    uint16_t vbe_interface_seg;
-    uint16_t vbe_interface_off;
-    uint16_t vbe_interface_len;
-};
-
-struct driver_status {
-    const char* name;
-    uint16_t io_base;
-    uint8_t ready;
-};
-
-struct ybash_entry {
-    char name[YBASH_NAME_CAPACITY];
-    char content[YBASH_CONTENT_CAPACITY];
-    size_t content_length;
-    uint8_t in_use;
-    uint8_t is_folder;
-};
-
 extern const char* const KERNEL_PATCH_VERSION;
 extern const char* const KERNEL_PATCH_LABEL;
-extern uint8_t serial_console_enabled;
-extern uint8_t framebuffer_video_enabled;
-extern uint8_t framebuffer_reject_non_32bpp;
-extern uint8_t vga_text_available;
-extern volatile uint8_t* framebuffer_memory;
-extern uint16_t framebuffer_width;
-extern uint16_t framebuffer_height;
-extern uint16_t framebuffer_pitch;
-extern uint8_t framebuffer_bpp;
-extern const struct multiboot_info* boot_mbi;
-extern uint32_t kernel_poll_ticks;
-extern struct driver_status driver_statuses[DRIVER_STATUS_CAPACITY];
-extern size_t driver_status_count;
-extern uint8_t driver_status_overflowed;
 
 static uint8_t keyboard_shift_held;
 static uint8_t keyboard_extended_prefix;
-static uint8_t ybash_capture_mode;
-static int ybash_capture_index;
+static uint8_t mouse_render_enabled;
+static int32_t mouse_cursor_x;
+static int32_t mouse_cursor_y;
 static char command_buffer[256];
 static size_t command_length;
-static struct ybash_entry ybash_entries[YBASH_ENTRY_CAPACITY];
-static size_t ybash_entry_count;
-
-static inline uint8_t port_read_u8(uint16_t port) {
-    uint8_t value;
-    __asm__ volatile ("inb %1, %0" : "=a"(value) : "dN"(port));
-    return value;
-}
-
-static inline void port_write_u8(uint16_t port, uint8_t value) {
-    __asm__ volatile ("outb %0, %1" : : "a"(value), "dN"(port));
-}
-
-static uint8_t ybash_poll_serial_char(char* out_char) {
-    if (!serial_console_enabled) {
-        return 0;
-    }
-
-    uint8_t line_status = port_read_u8(PORT_COM1 + 5);
-    if (line_status == 0xFFu || (line_status & 0x01u) == 0) {
-        return 0;
-    }
-
-    *out_char = (char)port_read_u8(PORT_COM1 + 0);
-    return 1;
-}
 
 static void ybash_prompt(void) {
     terminal_write("yBash> ");
@@ -109,177 +26,9 @@ static void ybash_restart_state(void) {
     command_length = 0;
     keyboard_shift_held = 0;
     keyboard_extended_prefix = 0;
-    ybash_capture_mode = 0;
-    ybash_capture_index = -1;
-}
-
-static void ybash_fs_reset(void) {
-    for (size_t i = 0; i < YBASH_ENTRY_CAPACITY; i++) {
-        ybash_entries[i].in_use = 0;
-        ybash_entries[i].is_folder = 0;
-        ybash_entries[i].content_length = 0;
-        ybash_entries[i].name[0] = '\0';
-        ybash_entries[i].content[0] = '\0';
-    }
-
-    ybash_entry_count = 0;
-}
-
-static const char* ybash_skip_spaces(const char* text) {
-    while (*text == ' ') {
-        text++;
-    }
-
-    return text;
-}
-
-static int ybash_find_entry(const char* name) {
-    for (size_t i = 0; i < YBASH_ENTRY_CAPACITY; i++) {
-        if (ybash_entries[i].in_use && kernel_streq(ybash_entries[i].name, name)) {
-            return (int)i;
-        }
-    }
-
-    return -1;
-}
-
-static void ybash_list_entries(void) {
-    if (ybash_entry_count == 0) {
-        terminal_write("No virtual entries.\n");
-        return;
-    }
-
-    for (size_t i = 0; i < YBASH_ENTRY_CAPACITY; i++) {
-        if (!ybash_entries[i].in_use) {
-            continue;
-        }
-
-        terminal_write(ybash_entries[i].is_folder ? "[fs] " : "[fl] ");
-        terminal_write(ybash_entries[i].name);
-        terminal_putchar('\n');
-    }
-}
-
-static int ybash_add_entry(const char* name, uint8_t is_folder) {
-    if (name[0] == '\0') {
-        terminal_write("usage: mk -fl|mk -fs <name>\n");
-        return -1;
-    }
-
-    if (ybash_find_entry(name) >= 0) {
-        terminal_write("entry already exists: ");
-        terminal_write(name);
-        terminal_putchar('\n');
-        return -1;
-    }
-
-    for (size_t i = 0; i < YBASH_ENTRY_CAPACITY; i++) {
-        if (ybash_entries[i].in_use) {
-            continue;
-        }
-
-        size_t j = 0;
-        while (name[j] != '\0' && j + 1 < YBASH_NAME_CAPACITY) {
-            ybash_entries[i].name[j] = name[j];
-            j++;
-        }
-        ybash_entries[i].name[j] = '\0';
-        ybash_entries[i].in_use = 1;
-        ybash_entries[i].is_folder = is_folder;
-        ybash_entries[i].content_length = 0;
-        ybash_entries[i].content[0] = '\0';
-        ybash_entry_count++;
-
-        terminal_write(is_folder ? "created virtual fs node: " : "created virtual file: ");
-        terminal_write(ybash_entries[i].name);
-        terminal_putchar('\n');
-        return (int)i;
-    }
-
-    terminal_write("yBash storage full.\n");
-    return -1;
-}
-
-static void ybash_append_content_char(int index, char c) {
-    if (index < 0 || (size_t)index >= YBASH_ENTRY_CAPACITY) {
-        return;
-    }
-
-    if ((size_t)index >= YBASH_ENTRY_CAPACITY || !ybash_entries[index].in_use || ybash_entries[index].is_folder) {
-        return;
-    }
-
-    if (ybash_entries[index].content_length + 1 >= YBASH_CONTENT_CAPACITY) {
-        terminal_write("\nfile content limit reached\n");
-        return;
-    }
-
-    ybash_entries[index].content[ybash_entries[index].content_length++] = c;
-    ybash_entries[index].content[ybash_entries[index].content_length] = '\0';
-}
-
-static void ybash_finish_capture(void) {
-    if (!ybash_capture_mode) {
-        return;
-    }
-
-    terminal_write("\nfile saved\n");
-    ybash_capture_mode = 0;
-    ybash_capture_index = -1;
-    ybash_prompt();
-}
-
-static void ybash_remove_entry(const char* name) {
-    int index = ybash_find_entry(name);
-    if (index < 0) {
-        terminal_write("not found: ");
-        terminal_write(name);
-        terminal_putchar('\n');
-        return;
-    }
-
-    if (ybash_capture_mode && ybash_capture_index == index) {
-        ybash_capture_mode = 0;
-        ybash_capture_index = -1;
-    }
-
-    ybash_entries[index].in_use = 0;
-    ybash_entries[index].is_folder = 0;
-    ybash_entries[index].name[0] = '\0';
-    if (ybash_entry_count > 0) {
-        ybash_entry_count--;
-    }
-
-    terminal_write("removed: ");
-    terminal_write(name);
-    terminal_putchar('\n');
-}
-
-static void ybash_describe_entry(const char* name) {
-    int index = ybash_find_entry(name);
-    if (index < 0) {
-        terminal_write("not found: ");
-        terminal_write(name);
-        terminal_putchar('\n');
-        return;
-    }
-
-    if (ybash_entries[index].is_folder) {
-        terminal_write("virtual fs node: ");
-        terminal_write(ybash_entries[index].name);
-        terminal_putchar('\n');
-        return;
-    }
-
-    terminal_write("virtual file: ");
-    terminal_write(ybash_entries[index].name);
-    terminal_putchar('\n');
-    if (ybash_entries[index].content_length == 0) {
-        terminal_write("(empty)\n");
-    } else {
-        terminal_write(ybash_entries[index].content);
-        terminal_putchar('\n');
-    }
+    mouse_render_enabled = 0;
+    mouse_cursor_x = 0;
+    mouse_cursor_y = 0;
 }
 
 static void ybash_command_drivers(void) {
@@ -298,9 +47,239 @@ static void ybash_command_drivers(void) {
     }
 }
 
+static void ybash_command_palette(void) {
+    uint8_t original_fg = terminal_get_fg_color();
+    uint8_t original_bg = terminal_get_bg_color();
+
+    for (uint8_t i = 0; i < 16; i++) {
+        terminal_set_color(i, original_bg);
+        terminal_write_uint(i);
+        terminal_write(": ");
+        terminal_write(terminal_color_name(i));
+        terminal_putchar('\n');
+    }
+
+    terminal_set_color(original_fg, original_bg);
+}
+
+static void ybash_command_uname(void) {
+    terminal_write("Yet/Just Another Kernel ");
+    terminal_write(KERNEL_PATCH_VERSION);
+    terminal_write(" ");
+    terminal_write(KERNEL_PATCH_LABEL);
+    terminal_putchar('\n');
+}
+
+static const char* ybash_skip_spaces(const char* text) {
+    while (*text == ' ') {
+        text++;
+    }
+
+    return text;
+}
+
+static void ybash_command_color(const char* args) {
+    char fg_text[32];
+    char bg_text[32];
+    size_t fg_len = 0;
+    size_t bg_len = 0;
+    const char* cursor = ybash_skip_spaces(args);
+
+    while (*cursor != '\0' && *cursor != ' ' && fg_len + 1 < sizeof(fg_text)) {
+        fg_text[fg_len++] = *cursor++;
+    }
+    fg_text[fg_len] = '\0';
+
+    cursor = ybash_skip_spaces(cursor);
+    while (*cursor != '\0' && *cursor != ' ' && bg_len + 1 < sizeof(bg_text)) {
+        bg_text[bg_len++] = *cursor++;
+    }
+    bg_text[bg_len] = '\0';
+
+    if (fg_len == 0) {
+        terminal_write("usage: color <fg> [bg]\n");
+        return;
+    }
+
+    int fg = terminal_parse_color(fg_text);
+    int bg = (bg_len == 0) ? terminal_get_bg_color() : terminal_parse_color(bg_text);
+    if (fg < 0 || bg < 0) {
+        terminal_write("invalid color. use palette for supported names/indices\n");
+        return;
+    }
+
+    terminal_set_color((uint8_t)fg, (uint8_t)bg);
+    terminal_write("Color set: fg=");
+    terminal_write(terminal_color_name((uint8_t)fg));
+    terminal_write(", bg=");
+    terminal_write(terminal_color_name((uint8_t)bg));
+    terminal_putchar('\n');
+}
+
+static void ybash_command_stat(const char* name) {
+    int index = vfs_lookup(name);
+    if (index < 0) {
+        terminal_write("not found: ");
+        terminal_write(name);
+        terminal_putchar('\n');
+        return;
+    }
+
+    const struct vfs_node* node = vfs_get_node(index);
+    if (node == 0) {
+        terminal_write("not found: ");
+        terminal_write(name);
+        terminal_putchar('\n');
+        return;
+    }
+
+    terminal_write("name: ");
+    terminal_write(node->name);
+    terminal_putchar('\n');
+    terminal_write("type: ");
+    terminal_write(vfs_node_type_name(node->type));
+    terminal_putchar('\n');
+
+    if (node->type != VFS_NODE_DIR) {
+        terminal_write("size: ");
+        terminal_write_uint((uint32_t)node->content_length);
+        terminal_write(" bytes\n");
+    }
+}
+
+static void ybash_command_write(const char* args) {
+    char name[VFS_NAME_CAPACITY];
+    size_t name_len = 0;
+    const char* cursor = ybash_skip_spaces(args);
+
+    while (*cursor != '\0' && *cursor != ' ' && name_len + 1 < sizeof(name)) {
+        name[name_len++] = *cursor++;
+    }
+    name[name_len] = '\0';
+
+    cursor = ybash_skip_spaces(cursor);
+    if (name_len == 0 || *cursor == '\0') {
+        terminal_write("usage: write <path> <text>\n");
+        return;
+    }
+
+    int index = vfs_lookup(name);
+    if (index < 0) {
+        terminal_write("not found: ");
+        terminal_write(name);
+        terminal_putchar('\n');
+        return;
+    }
+
+    const struct vfs_node* node = vfs_get_node(index);
+    if (node == 0 || node->type == VFS_NODE_DIR) {
+        terminal_write("cannot write to folder: ");
+        terminal_write(name);
+        terminal_putchar('\n');
+        return;
+    }
+
+    (void)vfs_write(name, cursor);
+
+    terminal_write("updated: ");
+    terminal_write(name);
+    terminal_putchar('\n');
+}
+
+static int ybash_parse_u32(const char** cursor, uint32_t* value_out) {
+    uint32_t value = 0;
+    uint8_t saw_digit = 0;
+    while (**cursor >= '0' && **cursor <= '9') {
+        saw_digit = 1;
+        value = (value * 10u) + (uint32_t)(**cursor - '0');
+        (*cursor)++;
+    }
+    if (!saw_digit) {
+        return -1;
+    }
+    *value_out = value;
+    return 0;
+}
+
+static void ybash_command_draw_dot(const char* args) {
+    const char* cursor = ybash_skip_spaces(args);
+    uint32_t x = 0;
+    uint32_t y = 0;
+
+    if (ybash_parse_u32(&cursor, &x) != 0 || *cursor != ',') {
+        terminal_write("usage: draw-dot x,y\n");
+        return;
+    }
+    cursor++;
+    if (ybash_parse_u32(&cursor, &y) != 0 || *ybash_skip_spaces(cursor) != '\0') {
+        terminal_write("usage: draw-dot x,y\n");
+        return;
+    }
+
+    if (terminal_draw_dot(x, y) != 0) {
+        terminal_write("draw-dot failed: framebuffer unavailable or out of range\n");
+        return;
+    }
+}
+
+static void ybash_command_mouse_on(void) {
+    if (!mouse_is_available()) {
+        terminal_write("mouse unavailable\n");
+        return;
+    }
+    if (!framebuffer_video_enabled) {
+        terminal_write("mouse rendering requires framebuffer video\n");
+        return;
+    }
+
+    mouse_cursor_x = (int32_t)(framebuffer_width / 2u);
+    mouse_cursor_y = (int32_t)(framebuffer_height / 2u);
+    mouse_render_enabled = 1u;
+    (void)terminal_draw_dot((uint32_t)mouse_cursor_x, (uint32_t)mouse_cursor_y);
+    terminal_write("mouse rendering enabled\n");
+}
+
+static void ybash_command_mouse_off(void) {
+    if (mouse_render_enabled) {
+        (void)terminal_clear_dot((uint32_t)mouse_cursor_x, (uint32_t)mouse_cursor_y);
+    }
+    mouse_render_enabled = 0u;
+    terminal_write("mouse rendering disabled\n");
+}
+
+static int32_t ybash_clamp_i32(int32_t value, int32_t min_value, int32_t max_value) {
+    if (value < min_value) {
+        return min_value;
+    }
+    if (value > max_value) {
+        return max_value;
+    }
+    return value;
+}
+
+static void ybash_mouse_render_tick(void) {
+    if (!mouse_render_enabled || !framebuffer_video_enabled || framebuffer_width == 0 || framebuffer_height == 0) {
+        return;
+    }
+
+    int8_t dx = 0;
+    int8_t dy = 0;
+    uint8_t buttons = 0;
+    while (mouse_poll_packet(&dx, &dy, &buttons)) {
+        (void)buttons;
+        (void)terminal_clear_dot((uint32_t)mouse_cursor_x, (uint32_t)mouse_cursor_y);
+
+        int32_t max_x = (int32_t)framebuffer_width - 1;
+        int32_t max_y = (int32_t)framebuffer_height - 1;
+        mouse_cursor_x = ybash_clamp_i32(mouse_cursor_x + (int32_t)dx, 0, max_x);
+        mouse_cursor_y = ybash_clamp_i32(mouse_cursor_y - (int32_t)dy, 0, max_y);
+
+        (void)terminal_draw_dot((uint32_t)mouse_cursor_x, (uint32_t)mouse_cursor_y);
+    }
+}
+
 static void ybash_command_help(void) {
-    terminal_write("Commands: help, clear, echo <text>, drivers, version, about, mem, video, serial, uptime, halt, reboot, bash, ls, cat <name>, touch <name>, mkdir <name>, mk -fl <name>, mk -fs <name>, rm <name>, rm -fs, restart\n");
-    terminal_write("mk -fl capture mode: Enter saves, Shift+Enter inserts newline\n");
+    terminal_write("Commands: help, clear, echo <text>, drivers, version, about, uname, mem, video, serial, uptime, halt, reboot, bash, color <fg> [bg], palette, draw-dot x,y, mouse on, mouse off, ls [path], cat <path>, stat <path>, touch <path>, mkdir <path>, write <path> <text>, rm <path>, mk -fs <path>, restart\n");
 }
 
 static void ybash_command_about(void) {
@@ -311,22 +290,40 @@ static void ybash_command_about(void) {
 }
 
 static void ybash_command_mem(void) {
-    if (boot_mbi == 0 || (boot_mbi->flags & (1u << 0)) == 0) {
-        terminal_write("Memory info unavailable from Multiboot.\n");
+    if (boot_mbi != 0 && (boot_mbi->flags & (1u << 0)) != 0) {
+        terminal_write("Lower memory (KB): ");
+        terminal_write_uint(boot_mbi->mem_lower);
+        terminal_putchar('\n');
+        terminal_write("Upper memory (KB): ");
+        terminal_write_uint(boot_mbi->mem_upper);
+        terminal_putchar('\n');
         return;
     }
 
-    terminal_write("Lower memory (KB): ");
-    terminal_write_uint(boot_mbi->mem_lower);
-    terminal_putchar('\n');
-    terminal_write("Upper memory (KB): ");
-    terminal_write_uint(boot_mbi->mem_upper);
-    terminal_putchar('\n');
+    if (boot_mb2_mem_available) {
+        terminal_write("Lower memory (KB): ");
+        terminal_write_uint(boot_mb2_mem_lower);
+        terminal_putchar('\n');
+        terminal_write("Upper memory (KB): ");
+        terminal_write_uint(boot_mb2_mem_upper);
+        terminal_putchar('\n');
+        return;
+    }
+
+    if (boot_mbi == 0) {
+        terminal_write("Memory info unavailable from bootloader.\n");
+        return;
+    }
+
+    if ((boot_mbi->flags & (1u << 0)) == 0) {
+        terminal_write("Memory info unavailable from Multiboot.\n");
+        return;
+    }
 }
 
 static void ybash_command_video(void) {
     if (framebuffer_video_enabled) {
-        terminal_write("Video: VBE framebuffer ");
+        terminal_write("Video: framebuffer ");
         terminal_write_uint(framebuffer_width);
         terminal_write("x");
         terminal_write_uint(framebuffer_height);
@@ -337,11 +334,18 @@ static void ybash_command_video(void) {
     }
 
     if (framebuffer_reject_non_32bpp) {
-        terminal_write("Video: unsupported VBE bpp, using VGA text/serial fallback\n");
+        terminal_write("Video: unsupported pixel format, using VGA text/serial fallback\n");
         return;
     }
 
-    if (vga_text_available) {
+    if (framebuffer_reject_reason != FB_REJECT_NONE) {
+        terminal_write("Video: framebuffer unavailable (reason ");
+        terminal_write_uint(framebuffer_reject_reason);
+        terminal_write("), using VGA text/serial fallback\n");
+        return;
+    }
+
+    if (terminal_vga_enabled) {
         terminal_write("Video: VGA text mode\n");
         return;
     }
@@ -371,13 +375,7 @@ static void ybash_command_halt(void) {
 static void ybash_command_reboot(void) {
     terminal_write("Rebooting...\n");
 
-    for (size_t spin = 0; spin < 100000; spin++) {
-        if ((port_read_u8(PORT_PS2_STATUS) & 0x02u) == 0) {
-            break;
-        }
-    }
-
-    port_write_u8(PORT_KEYBOARD_COMMAND, 0xFE);
+    platform_request_reboot();
     terminal_write("Reboot command sent (controller may ignore in some VMs).\n");
 }
 
@@ -387,8 +385,8 @@ static void ybash_command_bash(void) {
 }
 
 static void ybash_command_clear(void) {
-    terminal_initialize();
-    ybash_fs_reset();
+    terminal_clear_screen();
+    // RTCI reinitialization removed
 }
 
 static void ybash_execute_command(void) {
@@ -440,6 +438,12 @@ static void ybash_execute_command(void) {
         return;
     }
 
+    if (kernel_streq(command_buffer, "uname")) {
+        ybash_command_uname();
+        ybash_prompt();
+        return;
+    }
+
     if (kernel_streq(command_buffer, "mem")) {
         ybash_command_mem();
         ybash_prompt();
@@ -481,58 +485,161 @@ static void ybash_execute_command(void) {
         return;
     }
 
-    if (kernel_streq(command_buffer, "ls")) {
-        ybash_list_entries();
+    if (kernel_streq(command_buffer, "palette")) {
+        ybash_command_palette();
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_starts_with(command_buffer, "color ")) {
+        ybash_command_color(command_buffer + 6);
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_starts_with(command_buffer, "draw-dot ")) {
+        ybash_command_draw_dot(command_buffer + 9);
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_streq(command_buffer, "mouse on")) {
+        ybash_command_mouse_on();
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_streq(command_buffer, "mouse off")) {
+        ybash_command_mouse_off();
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_starts_with(command_buffer, "ls")) {
+        const char* path = ybash_skip_spaces(command_buffer + 2);
+        if (*path == '\0') {
+            path = "/";
+        }
+        int node_indexes[VFS_NODE_CAPACITY];
+        size_t count = vfs_list_children(path, node_indexes, VFS_NODE_CAPACITY);
+        if (count == 0) {
+            terminal_write("No virtual entries.\n");
+        } else {
+            for (size_t i = 0; i < count && i < VFS_NODE_CAPACITY; i++) {
+                const struct vfs_node* node = vfs_get_node(node_indexes[i]);
+                if (node == 0) {
+                    continue;
+                }
+                terminal_write(node->type == VFS_NODE_DIR ? "[fs] " : (node->type == VFS_NODE_EXECUTABLE ? "[rt] " : "[fl] "));
+                terminal_write(node->name);
+                terminal_putchar('\n');
+            }
+        }
         ybash_prompt();
         return;
     }
 
     if (kernel_starts_with(command_buffer, "cat ")) {
-        ybash_describe_entry(ybash_skip_spaces(command_buffer + 4));
+        const char* path = ybash_skip_spaces(command_buffer + 4);
+        const char* content = vfs_read(path);
+        if (content == 0) {
+            terminal_write("not found: ");
+            terminal_write(path);
+            terminal_putchar('\n');
+        } else {
+            terminal_write(content);
+            terminal_putchar('\n');
+        }
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_starts_with(command_buffer, "stat ")) {
+        ybash_command_stat(ybash_skip_spaces(command_buffer + 5));
         ybash_prompt();
         return;
     }
 
     if (kernel_starts_with(command_buffer, "touch ")) {
-        (void)ybash_add_entry(ybash_skip_spaces(command_buffer + 6), 0);
+        const char* path = ybash_skip_spaces(command_buffer + 6);
+        (void)vfs_create_file(path);
         ybash_prompt();
         return;
     }
 
     if (kernel_starts_with(command_buffer, "mkdir ")) {
-        (void)ybash_add_entry(ybash_skip_spaces(command_buffer + 6), 1);
+        const char* path = ybash_skip_spaces(command_buffer + 6);
+        (void)vfs_create_dir(path);
         ybash_prompt();
         return;
     }
 
-    if (kernel_starts_with(command_buffer, "mk -fl ")) {
-        int file_index = ybash_add_entry(ybash_skip_spaces(command_buffer + 7), 0);
-        if (file_index >= 0) {
-            ybash_capture_mode = 1;
-            ybash_capture_index = file_index;
-            terminal_write("enter file contents (Shift+Enter = newline, Enter = save)\n");
-            terminal_write("content> ");
-        } else {
-            ybash_prompt();
-        }
+    if (kernel_starts_with(command_buffer, "write ")) {
+        ybash_command_write(command_buffer + 6);
+        ybash_prompt();
         return;
     }
 
     if (kernel_starts_with(command_buffer, "mk -fs ")) {
-        (void)ybash_add_entry(ybash_skip_spaces(command_buffer + 7), 1);
+        const char* path = ybash_skip_spaces(command_buffer + 7);
+        (void)vfs_create_dir(path);
         ybash_prompt();
         return;
     }
 
     if (kernel_streq(command_buffer, "rm -fs")) {
-        ybash_fs_reset();
-        terminal_write("virtual fs cleared\n");
+        terminal_write("storage drivers are disabled right now\n");
         ybash_prompt();
         return;
     }
 
     if (kernel_starts_with(command_buffer, "rm ")) {
-        ybash_remove_entry(ybash_skip_spaces(command_buffer + 3));
+        const char* path = ybash_skip_spaces(command_buffer + 3);
+        if (vfs_remove(path) != 0) {
+            terminal_write("not found: ");
+            terminal_write(path);
+            terminal_putchar('\n');
+        } else {
+            terminal_write("removed: ");
+            terminal_write(path);
+            terminal_putchar('\n');
+        }
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_starts_with(command_buffer, "rtci ")) {
+        terminal_write("RTCI is disabled while storage drivers are offline\n");
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_streq(command_buffer, "services")) {
+        terminal_write("RTCI services are disabled\n");
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_streq(command_buffer, "fs")) {
+        terminal_write("storage drivers are disabled\n");
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_streq(command_buffer, "fs sync")) {
+        terminal_write("storage drivers are disabled\n");
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_streq(command_buffer, "fs flash")) {
+        terminal_write("storage drivers are disabled\n");
+        ybash_prompt();
+        return;
+    }
+
+    if (kernel_streq(command_buffer, "fs info")) {
+        terminal_write("storage drivers are disabled\n");
         ybash_prompt();
         return;
     }
@@ -551,31 +658,6 @@ static void ybash_execute_command(void) {
 }
 
 static void ybash_handle_char(char c) {
-    if (ybash_capture_mode) {
-        if (c == '\n') {
-            ybash_finish_capture();
-            return;
-        }
-
-        if (c == '\b') {
-            if (ybash_capture_index >= 0) {
-                struct ybash_entry* entry = &ybash_entries[ybash_capture_index];
-                if (entry->content_length > 0) {
-                    entry->content_length--;
-                    entry->content[entry->content_length] = '\0';
-                    terminal_write("\b \b");
-                }
-            }
-            return;
-        }
-
-        if (c >= 32 && c <= 126) {
-            ybash_append_content_char(ybash_capture_index, c);
-            terminal_putchar(c);
-        }
-        return;
-    }
-
     if (c == '\n') {
         terminal_putchar('\n');
         ybash_execute_command();
@@ -657,19 +739,11 @@ static void ybash_handle_scancode(uint8_t scancode) {
         return;
     }
 
-    if ((scancode & 0x80u) != 0) {
+    if (scancode >= 128u) {
         return;
     }
 
-    if (ybash_capture_mode && scancode == 0x1C) {
-        if (keyboard_shift_held) {
-            ybash_append_content_char(ybash_capture_index, '\n');
-            terminal_putchar('\n');
-            terminal_write("content> ");
-            return;
-        }
-
-        ybash_handle_char('\n');
+    if ((scancode & 0x80u) != 0) {
         return;
     }
 
@@ -685,7 +759,6 @@ void yBash_start(uint32_t magic, const struct multiboot_info* mbi) {
     (void)magic;
     (void)mbi;
 
-    ybash_fs_reset();
     ybash_restart_state();
     terminal_write("yBash ready. Type help for commands.\n");
     ybash_prompt();
@@ -694,7 +767,7 @@ void yBash_start(uint32_t magic, const struct multiboot_info* mbi) {
         kernel_poll_ticks++;
 
         char serial_char;
-        if (ybash_poll_serial_char(&serial_char)) {
+        if (serial_poll_char(&serial_char)) {
             if (serial_char == '\r') {
                 ybash_handle_char('\n');
             } else if (serial_char == 0x7Fu) {
@@ -708,6 +781,8 @@ void yBash_start(uint32_t magic, const struct multiboot_info* mbi) {
         if (scancode != 0) {
             ybash_handle_scancode(scancode);
         }
+
+        ybash_mouse_render_tick();
 
         __asm__ volatile ("pause");
     }

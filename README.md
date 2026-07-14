@@ -1,51 +1,20 @@
-# Just Another Kernel 26.5.1
+# Yet/Just Another Kernel 26.5.2
 
-This is a kernel completly built with vibe coding with GPT-5.3-codex and other models.
+A minimal, yet functional kernel built by Ring Inc.
 
-### This patch includes:
-- A working terminal with commands
-- A virtual FS in the RAM
-- Custom VGA drivers that work in most places
-- Near instant boot
-- GRUB
+### Changelog (from 26.5.1)
+- Disabled FS drivers due to data corruption
+- Added a new `draw-dot x,y` command to draw a single pixel on the screen
+- Added cursor drivers along with a `mouse on/off` command
 
-### Fixed Bugs (from 26.5a)
-- Keyboard Puller fixed
-- Rendering in VGA mode is fixed
-- Backspace doing "? ?" has been fixed
-- Other bugfixes.
----
-# How to run
+### Compiling
 
-Simplist way is to go to https://copy.sh/v86/ then
-1. Copy exact .iso file from the build/ folder
-2. Place it in the Custom CD Image (ISO) upload button
-3. Press "Start Emulation"
+To compile, run `run-kernel.sh`
 
-## Other ways to run
+*Note: GRUB and other dependencies will need to be installed*
 
-Running *directly* on the hardware
-1. Copy exact .iso file from the build/ folder
-2. Depending on your operating system, get an ISO flasher.
-3. Flash a USB (minimum 1GB) with the ISO.
-4. Plug in your computer
-5. Restart the computer and select the USB as boot device
+### Running Pre-compiled
 
-*Note:* TPM could block the kernel, so you may need to disable TPM in the BIOS.
+To run the pre-compiled kernel, download the ISO from the `build/` directory and run it in a virtual machine such as QEMU or VirtualBox. You can also burn the ISO to a USB drive and boot from it on your physical machine.
 
-6. Now you are in the kernel!
-
-Using Qemu for emulation (the hardest way)
-
-#### LINUX RECOMENDED!!
-1. clone or download repository zip (recomended to download zip from the release page)
-2. chmod the `./run-kernel.sh` file
-3. execute `./run-kernel.sh` and install any dependencies requested by the script.
-
-*Note:* This will compile it on the spot, then load it into Qemu.
-
-4. Wait for the command prompt to pull up a Qemu Window.
-5. If any bugs happen in the kernel/build, report them please.
-6. You are now in the Qemu Emulator with the kernel.
-
-Any recomendations and feedback is welcome. This project is free to copy.
+## Suggestions and contributions are welcome! Please open an issue or submit a pull request on GitHub!
