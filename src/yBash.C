@@ -18,8 +18,52 @@ static int32_t mouse_cursor_y;
 static char command_buffer[256];
 static size_t command_length;
 
+static const int8_t MOUSE_CURSOR_SHAPE[][2] = {
+    {0, 0}, {1, 0},
+    {0, 1}, {1, 1}, {2, 1}, 
+    {0, 2}, {1, 2}, {2, 2}, {3, 2},
+    {0, 3}, {1, 3}, {2, 3}, {3, 3}, {4, 3}, 
+    {0, 4}, {1, 4}, {2, 4}, {3, 4}, {4, 4}, {5, 4},
+    {0, 5}, {1, 5}, {2, 5}, {3, 5}, {4, 5}, {5, 5}, {6, 5}, 
+    {0, 6}, {1, 6}, {2, 6}, {3, 6}, {4, 6}, {5, 6}, {6, 6}, {7, 6},
+    {0, 7}, {1, 7}, {2, 7}, {3, 7}, {4, 7}, {5, 7}, {6, 7}, {7, 7}, {8, 7},
+    {0, 8}, {1, 8}, {2, 8}, {3, 8}, {4, 8}, {5, 8}, {6, 8}, {7, 8}, {8, 8}, {9, 8},
+    {0, 9}, {1, 9}, {2, 9}, {3, 9}, {4, 9}, {5, 9}, {6, 9}, {7, 9}, {8, 9}, {9, 9},
+    {0, 10}, {1, 10}, {2, 10}, {3, 10}, {4, 10}, {5, 10},
+    {0, 11}, {1, 11}, {2, 11}, {3, 11}, {4, 11}, {5, 11}, 
+    {0, 12}, {1, 12}, {2, 12}, {3, 12}, {4, 12}, {5, 12}, {6, 12}, 
+    {0, 13}, {1, 13}, {2, 13},          {4, 13}, {5, 13}, {6, 13}, 
+    {0, 14}, {1, 14},                            {5, 14}, {6, 14}, {7, 14}, 
+    {0, 15},                                     {5, 15}, {6, 15}, {7, 15}, 
+    {0, 16},                                              {6, 16}, {7, 16}, {8, 16},
+                                                          {6, 17}, {7, 17}, {8, 17}, {9, 17},
+                                                                   {7, 18}, {8, 18}, {9, 18},
+                                                                   {7, 19}, {8, 19}, {9, 19},
+                                                                            {8, 20}
+};
+
+static void ybash_mouse_cursor_plot(int32_t base_x, int32_t base_y, uint8_t draw) {
+    if (!framebuffer_video_enabled || framebuffer_width == 0 || framebuffer_height == 0) {
+        return;
+    }
+
+    for (size_t i = 0; i < (sizeof(MOUSE_CURSOR_SHAPE) / sizeof(MOUSE_CURSOR_SHAPE[0])); i++) {
+        int32_t x = base_x + (int32_t)MOUSE_CURSOR_SHAPE[i][0];
+        int32_t y = base_y + (int32_t)MOUSE_CURSOR_SHAPE[i][1];
+        if (x < 0 || y < 0 || x >= (int32_t)framebuffer_width || y >= (int32_t)framebuffer_height) {
+            continue;
+        }
+
+        if (draw) {
+            (void)terminal_draw_dot((uint32_t)x, (uint32_t)y);
+        } else {
+            (void)terminal_clear_dot((uint32_t)x, (uint32_t)y);
+        }
+    }
+}
+
 static void ybash_prompt(void) {
-    terminal_write("yBash> ");
+    terminal_write("> ");
 }
 
 static void ybash_restart_state(void) {
@@ -235,13 +279,13 @@ static void ybash_command_mouse_on(void) {
     mouse_cursor_x = (int32_t)(framebuffer_width / 2u);
     mouse_cursor_y = (int32_t)(framebuffer_height / 2u);
     mouse_render_enabled = 1u;
-    (void)terminal_draw_dot((uint32_t)mouse_cursor_x, (uint32_t)mouse_cursor_y);
+    ybash_mouse_cursor_plot(mouse_cursor_x, mouse_cursor_y, 1u);
     terminal_write("mouse rendering enabled\n");
 }
 
 static void ybash_command_mouse_off(void) {
     if (mouse_render_enabled) {
-        (void)terminal_clear_dot((uint32_t)mouse_cursor_x, (uint32_t)mouse_cursor_y);
+        ybash_mouse_cursor_plot(mouse_cursor_x, mouse_cursor_y, 0u);
     }
     mouse_render_enabled = 0u;
     terminal_write("mouse rendering disabled\n");
@@ -267,14 +311,14 @@ static void ybash_mouse_render_tick(void) {
     uint8_t buttons = 0;
     while (mouse_poll_packet(&dx, &dy, &buttons)) {
         (void)buttons;
-        (void)terminal_clear_dot((uint32_t)mouse_cursor_x, (uint32_t)mouse_cursor_y);
+        ybash_mouse_cursor_plot(mouse_cursor_x, mouse_cursor_y, 0u);
 
         int32_t max_x = (int32_t)framebuffer_width - 1;
         int32_t max_y = (int32_t)framebuffer_height - 1;
         mouse_cursor_x = ybash_clamp_i32(mouse_cursor_x + (int32_t)dx, 0, max_x);
         mouse_cursor_y = ybash_clamp_i32(mouse_cursor_y - (int32_t)dy, 0, max_y);
 
-        (void)terminal_draw_dot((uint32_t)mouse_cursor_x, (uint32_t)mouse_cursor_y);
+        ybash_mouse_cursor_plot(mouse_cursor_x, mouse_cursor_y, 1u);
     }
 }
 
@@ -579,10 +623,11 @@ static void ybash_execute_command(void) {
         ybash_prompt();
         return;
     }
-
+    
     if (kernel_starts_with(command_buffer, "mk -fs ")) {
-        const char* path = ybash_skip_spaces(command_buffer + 7);
-        (void)vfs_create_dir(path);
+        //const char* path = ybash_skip_spaces(command_buffer + 7);
+        //(void)vfs_create_dir(path); 
+        terminal_write("storage drivers are disabled right now\n");
         ybash_prompt();
         return;
     }

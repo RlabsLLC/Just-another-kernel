@@ -22,14 +22,14 @@ static const uint32_t TERMINAL_COLOR_PALETTE[16] = {
     0x000000u, 0x0000AAu, 0x00AA00u, 0x00AAAAu,
     0xAA0000u, 0xAA00AAu, 0xAA5500u, 0xAAAAAAu,
     0x555555u, 0x5555FFu, 0x55FF55u, 0x55FFFFu,
-    0xFF5555u, 0xFF55FFu, 0xFFFF55u, 0xFFFFFFu
+    0xFF5555u, 0xFF55FFu, 0xFFFF55u, 0xFFFFFFu,
 };
 
 static const char* const TERMINAL_COLOR_NAMES[16] = {
     "black", "blue", "green", "cyan",
     "red", "magenta", "brown", "light-gray",
     "dark-gray", "light-blue", "light-green", "light-cyan",
-    "light-red", "light-magenta", "yellow", "white"
+    "light-red", "light-magenta", "yellow", "white",
 };
 
 static inline uint8_t vga_entry_color(uint8_t fg, uint8_t bg) {
@@ -421,6 +421,14 @@ static uint8_t glyph_row_5x7(char c, uint8_t row) {
         case '*' : return row == 1 ? 0x15 : row == 2 ? 0x0E : row == 3 ? 0x04 : 0x00;
         case '"': return row <= 1 ? 0x0A : 0x00;
         case '\'': return row <= 1 ? 0x04 : 0x00;
+        case '#': return row == 1 || row == 3 || row == 5 ? 0x0E : 0x00;
+        case '%': return row == 0 ? 0x11 : row == 1 ? 0x12 : row == 2 ? 0x04 : row == 3 ? 0x08 : row == 4 ? 0x11 : row == 5 ? 0x12 : row == 6 ? 0x04 : 0x00;
+        case '|': return row == 0 || row == 1 || row == 2 || row == 3 || row == 4 || row == 5 || row == 6 ? 0x04 : 0x00;
+        case '`': return row == 0 ? 0x04 : 0x00;
+        case '^': return row == 0 ? 0x04 : row == 1 ? 0x0A : row == 2 ? 0x11 : 0x00;
+        case '~': return row == 0 ? 0x0A : row == 1 ? 0x15 : row == 2 ? 0x0A : 0x00;
+        case '@': return row == 0 ? 0x0E : row == 1 ? 0x11 : row == 2 ? 0x1D : row == 3 ? 0x15 : row == 4 ? 0x1D : row == 5 ? 0x10 : row == 6 ? 0x0F : 0x00;
+        case '&': return row == 0 ? 0x0E : row == 1 ? 0x11 : row == 2 ? 0x0E : row == 3 ? 0x15 : row == 4 ? 0x1F : row == 5 ? 0x11 : row == 6 ? 0x0E : 0x00;
         default: { static const uint8_t p[7] = {0x0E,0x11,0x01,0x02,0x04,0x00,0x04}; return p[row]; }
     }
 }

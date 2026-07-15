@@ -7,8 +7,8 @@
 #include "kernel_utils.h"
 #include "yBash.h"
 
-const char* const KERNEL_PATCH_VERSION = "26.5.2";
-const char* const KERNEL_PATCH_LABEL = "[Patch 26.5.2]";
+const char* const KERNEL_PATCH_VERSION = "26.5.2-2";
+const char* const KERNEL_PATCH_LABEL = "[Patch 26.5.2-2]";
 
 static void print_driver_statuses(void) {
     for (size_t i = 0; i < driver_status_count; i++) {
@@ -83,6 +83,13 @@ static void print_boot_info(uint32_t magic, const struct multiboot_info* mbi) {
     } else {
         terminal_write("Video driver: VGA text / serial fallback\n");
     }
+    if (!mouse_is_available()) {
+        terminal_write("Mouse input unavailable. Command 'mouse' will not work.\n");
+    }
+    if (!ps2_keyboard_available) {
+        terminal_write("Keyboard input unavailable. Use serial port for input instead.\n");
+    }
+
 }
 
 void kernel_main(uint32_t magic, uint32_t multiboot_info_addr) {
