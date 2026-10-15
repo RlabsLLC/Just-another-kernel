@@ -8,11 +8,13 @@ A minimal, yet functional kernel built by Ring Inc.
 - Added a fixed-size kernel heap with allocation/free and a `heap` status command
 - Renamed RTCI services to plugins and added kernel handler registration with `plugins`/`plugin <path>` commands
 - Added a reusable GRUB boot menu configuration at `boot/grub/grub.cfg`
+- Added clipped framebuffer fill paths and basic GUI drawing primitives; `gui-demo` displays the prototype and enables a centered mouse cursor when available
 
 ### Known issues
 - The kernel heap is a fixed 64 KiB region; it is not backed by physical-page allocation.
 - Plugins are statically registered kernel handlers, not dynamically loaded binaries.
-- The 26.5.3 checklist defers paging, scheduling, GUI support, and networking to 26.6.
+- Paging, scheduling, GUI support, and networking are planned across the 26.6a, 26.6b, and 26.6 milestones; Linux driver compatibility is deferred to 26.6-x.
+- The 26.6a GUI is non-interactive and uses CPU-rendered framebuffer drawing; there is no GPU acceleration or window manager.
 
 ### vSH
 The kernel starts in vSH, its built-in command shell. Type `help` at the `vsh>` prompt to list available commands. The host-side `./run-kernel.sh --bash` option is separate and starts GNU Bash on the host.

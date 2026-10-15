@@ -35,7 +35,7 @@ LDFLAGS := -m elf_i386 -T linker.ld --build-id=none
 BUILD_DIR := build
 SRC_DIR := src
 
-OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/kernel_text.o $(BUILD_DIR)/kernel_format.o $(BUILD_DIR)/kernel_heap.o $(BUILD_DIR)/vsh.o $(BUILD_DIR)/terminal_driver_legacy.o $(BUILD_DIR)/virtualfs.o $(BUILD_DIR)/plugins.o
+OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/kernel_text.o $(BUILD_DIR)/kernel_format.o $(BUILD_DIR)/kernel_heap.o $(BUILD_DIR)/gui.o $(BUILD_DIR)/vsh.o $(BUILD_DIR)/terminal_driver_legacy.o $(BUILD_DIR)/virtualfs.o $(BUILD_DIR)/plugins.o
 
 .PHONY: all clean
 
@@ -57,6 +57,9 @@ $(BUILD_DIR)/kernel_format.o: $(SRC_DIR)/kernel_format.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/kernel_heap.o: $(SRC_DIR)/kernel_heap.c $(SRC_DIR)/kernel_heap.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/gui.o: $(SRC_DIR)/gui.c $(SRC_DIR)/gui.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/vsh.o: $(SRC_DIR)/vsh.c | $(BUILD_DIR)

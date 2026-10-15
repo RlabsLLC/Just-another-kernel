@@ -108,10 +108,10 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_addr) {
     terminal_write(KERNEL_PATCH_LABEL);
     terminal_putchar('\n');
     terminal_write("A minimal, custom kernel built by RingDev.\n");
-    print_boot_info(magic, mbi);
     terminal_write("Probing drivers...\n");
     detect_drivers();
     print_driver_statuses();
+    print_boot_info(magic, mbi);
     terminal_write("Keyboard input mode: polling.\n");
 
     vfs_init();

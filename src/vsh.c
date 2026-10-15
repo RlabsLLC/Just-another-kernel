@@ -5,6 +5,7 @@
 #include "Drivers/Legacy/TerminalDriver.h"
 #include "Drivers/Latest/VirtualFS.h"
 #include "Drivers/Latest/Plugins.h"
+#include "gui.h"
 #include "kernel_heap.h"
 #include "kernel_utils.h"
 #include "vsh.h"
@@ -362,7 +363,7 @@ static void vsh_mouse_render_tick(void) {
 }
 
 static void vsh_command_help(void) {
-    terminal_write("Commands: help, clear, echo <text>, drivers, pci, plugins, plugin <path>, version, about, uname, mem, heap, video, serial, uptime, halt, reboot, color <fg> [bg], palette, draw-dot x,y, mouse on, mouse off, ls [path], cat <path>, stat <path>, touch <path>, mkdir <path>, write <path> <text>, rm <path>, mk -fs <path>, restart\n");
+    terminal_write("Commands: help, clear, echo <text>, drivers, pci, plugins, plugin <path>, version, about, uname, mem, heap, video, gui-demo, serial, uptime, halt, reboot, color <fg> [bg], palette, draw-dot x,y, mouse on, mouse off, ls [path], cat <path>, stat <path>, touch <path>, mkdir <path>, write <path> <text>, rm <path>, mk -fs <path>, restart\n");
 }
 
 static void vsh_command_about(void) {
@@ -459,6 +460,29 @@ static void vsh_command_video(void) {
     }
 
     terminal_write("Video: serial console fallback\n");
+}
+
+static void vsh_command_gui_demo(void) {
+    uint8_t cursor_was_enabled = mouse_render_enabled;
+    if (cursor_was_enabled) {
+        vsh_mouse_cursor_plot(mouse_cursor_x, mouse_cursor_y, 0u);
+    }
+    terminal_clear_screen();
+    if (gui_draw_demo() != 0) {
+        terminal_write("GUI demo unavailable: framebuffer must be at least 240x180\n");
+        mouse_render_enabled = 0u;
+        return;
+    }
+    if (mouse_is_available()) {
+        if (!cursor_was_enabled) {
+            mouse_cursor_x = (int32_t)(framebuffer_width / 2u);
+            mouse_cursor_y = (int32_t)(framebuffer_height / 2u);
+        }
+        mouse_render_enabled = 1u;
+        vsh_mouse_cursor_plot(mouse_cursor_x, mouse_cursor_y, 1u);
+    } else {
+        mouse_render_enabled = 0u;
+    }
 }
 
 static void vsh_command_serial(void) {
@@ -566,6 +590,12 @@ static void vsh_execute_command(void) {
 
     if (kernel_streq(command_buffer, "video")) {
         vsh_command_video();
+        vsh_prompt();
+        return;
+    }
+
+    if (kernel_streq(command_buffer, "gui-demo")) {
+        vsh_command_gui_demo();
         vsh_prompt();
         return;
     }

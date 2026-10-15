@@ -196,6 +196,7 @@ struct multiboot2_tag_framebuffer {
 static void framebuffer_put_pixel(uint32_t x, uint32_t y, uint32_t color24);
 static void framebuffer_clear(uint32_t color24);
 static void terminal_backspace(void);
+static uint8_t glyph_row_5x7(char c, uint8_t row);
 
 static const uint8_t VGA_TEXTMODE_REGS[] = {
     0x67,
@@ -344,12 +345,61 @@ static void framebuffer_put_pixel(uint32_t x, uint32_t y, uint32_t color24) {
 }
 
 static void framebuffer_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color24) {
-    if (!framebuffer_video_enabled || w == 0 || h == 0) { return; }
-    for (uint32_t iy = 0; iy < h && (y + iy) < framebuffer_height; iy++) {
-        for (uint32_t ix = 0; ix < w && (x + ix) < framebuffer_width; ix++) {
-            framebuffer_put_pixel(x + ix, y + iy, color24);
+    if (!framebuffer_video_enabled || w == 0 || h == 0 ||
+        x >= framebuffer_width || y >= framebuffer_height) {
+        return;
+    }
+
+    uint32_t clipped_width = w;
+    uint32_t clipped_height = h;
+    if (clipped_width > framebuffer_width - x) {
+        clipped_width = framebuffer_width - x;
+    }
+    if (clipped_height > framebuffer_height - y) {
+        clipped_height = framebuffer_height - y;
+    }
+
+    uint32_t color = color24 & 0x00FFFFFFu;
+    if (framebuffer_bpp == 32u) {
+        for (uint32_t iy = 0; iy < clipped_height; iy++) {
+            volatile uint32_t* pixel = (volatile uint32_t*)(framebuffer_memory +
+                ((size_t)(y + iy) * framebuffer_pitch) + (size_t)x * 4u);
+            for (uint32_t ix = 0; ix < clipped_width; ix++) {
+                pixel[ix] = color;
+            }
+        }
+        return;
+    }
+
+    if (framebuffer_bpp == 16u) {
+        uint16_t encoded = (uint16_t)((((color >> 19) & 0x1Fu) << 11) |
+                                      (((color >> 10) & 0x3Fu) << 5) |
+                                      ((color >> 3) & 0x1Fu));
+        for (uint32_t iy = 0; iy < clipped_height; iy++) {
+            volatile uint16_t* pixel = (volatile uint16_t*)(framebuffer_memory +
+                ((size_t)(y + iy) * framebuffer_pitch) + (size_t)x * 2u);
+            for (uint32_t ix = 0; ix < clipped_width; ix++) {
+                pixel[ix] = encoded;
+            }
+        }
+        return;
+    }
+
+    for (uint32_t iy = 0; iy < clipped_height; iy++) {
+        uint32_t row_y = y + iy;
+        for (uint32_t ix = 0; ix < clipped_width; ix++) {
+            framebuffer_put_pixel(x + ix, row_y, color);
         }
     }
+}
+
+int terminal_fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color) {
+    if (!framebuffer_video_enabled || width == 0 || height == 0 ||
+        x >= framebuffer_width || y >= framebuffer_height) {
+        return -1;
+    }
+    framebuffer_fill_rect(x, y, width, height, color);
+    return 0;
 }
 
 int terminal_draw_dot(uint32_t x, uint32_t y) {
@@ -401,6 +451,39 @@ int terminal_write_pixel(uint32_t x, uint32_t y, uint32_t color) {
         return -1;
     }
     framebuffer_put_pixel(x, y, color);
+    return 0;
+}
+
+int terminal_draw_text_at(uint32_t x, uint32_t y, const char* text, uint32_t fg, uint32_t bg) {
+    if (!framebuffer_video_enabled || text == 0 || x >= framebuffer_width ||
+        y >= framebuffer_height || y > (uint32_t)-1 - 15u) {
+        return -1;
+    }
+
+    size_t index = 0;
+    while (text[index] != '\0') {
+        if (index > ((size_t)-1 - x) / FRAMEBUFFER_CHAR_WIDTH) {
+            break;
+        }
+        size_t cell_x = (size_t)x + index * FRAMEBUFFER_CHAR_WIDTH;
+        if (cell_x >= framebuffer_width) {
+            break;
+        }
+        framebuffer_fill_rect((uint32_t)cell_x, y, (uint32_t)FRAMEBUFFER_CHAR_WIDTH,
+                              (uint32_t)FRAMEBUFFER_CHAR_HEIGHT, bg);
+        for (uint8_t row = 0; row < 7u; row++) {
+            uint8_t bits = glyph_row_5x7(text[index], row);
+            uint32_t pixel_y = y + 1u + (uint32_t)row * 2u;
+            for (uint8_t dy = 0; dy < 2u; dy++) {
+                for (uint8_t col = 0; col < 5u; col++) {
+                    if ((bits & (1u << (4u - col))) != 0u) {
+                        framebuffer_put_pixel((uint32_t)cell_x + 1u + col, pixel_y + dy, fg);
+                    }
+                }
+            }
+        }
+        index++;
+    }
     return 0;
 }
 

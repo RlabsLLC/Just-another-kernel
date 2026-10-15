@@ -14,26 +14,44 @@ Features:
 [x] Add compatibility to the GRUB bootloader (Multiboot 1/2)
 [x] Add configure compatibility for GRUB
 
-JAK 26.6:
+JAK 26.6a - Graphics:
 
 Bug Fixes:
-[Waiting...]
+[x] Mouse doesnt appear in GUI demo
 
 Kernel Tweaks:
-[ ] Add support for GUI
-[ ] Optimize GPU usage
-[ ] Improve CPU scheduling
-[ ] Enhance I/O handling
-[ ] Improve network stack
+[x] Optimize clipped framebuffer rectangle fills with pitch-aware fast paths
 
 Features:
-[ ] Implement file system abstraction layer
-[ ] Add support for virtual memory
-[ ] Implement process scheduling algorithms
-[ ] Add support for device drivers
+[x] Add basic framebuffer windows, labels, buttons, and a vSH `gui-demo` command
 
 Experimental Features:
-[ ] Experimental rendering engine to improve rendering performance
-[ ] Experimental storage management system
-[ ] Experimental network additions
-[ ] Add linux kernel driver support
+[x] Prototype an optimized software renderer (no hardware acceleration)
+
+JAK 26.6b - Core platform and storage:
+
+Kernel Tweaks:
+[ ] Improve CPU scheduling
+[ ] Enhance I/O handling
+
+Features:
+[ ] Add support for virtual memory
+[ ] Implement process scheduling algorithms
+[ ] Add a device-driver registration and initialization framework
+[ ] Implement a file system abstraction layer
+
+Experimental Features:
+[ ] Prototype an experimental storage management system
+
+JAK 26.6 - Networking:
+
+Kernel Tweaks:
+[ ] Implement the network stack
+
+Experimental Features:
+[ ] Add experimental network support
+
+JAK 26.6-1 - Compatibility follow-up:
+
+Features:
+[ ] Research an approach for Linux kernel driver compatibility

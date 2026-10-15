@@ -11,6 +11,8 @@ int terminal_draw_dot(uint32_t x, uint32_t y);
 int terminal_clear_dot(uint32_t x, uint32_t y);
 int terminal_read_pixel(uint32_t x, uint32_t y, uint32_t* color_out);
 int terminal_write_pixel(uint32_t x, uint32_t y, uint32_t color);
+int terminal_fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color);
+int terminal_draw_text_at(uint32_t x, uint32_t y, const char* text, uint32_t fg, uint32_t bg);
 void terminal_set_color(uint8_t fg, uint8_t bg);
 void terminal_reset_color(void);
 uint8_t terminal_get_fg_color(void);
