@@ -50,6 +50,16 @@ static inline void port_write_u8(uint16_t port, uint8_t value) {
     __asm__ volatile ("outb %0, %1" : : "a"(value), "dN"(port));
 }
 
+static inline uint32_t port_read_u32(uint16_t port) {
+    uint32_t value;
+    __asm__ volatile ("inl %1, %0" : "=a"(value) : "dN"(port));
+    return value;
+}
+
+static inline void port_write_u32(uint16_t port, uint32_t value) {
+    __asm__ volatile ("outl %0, %1" : : "a"(value), "dN"(port));
+}
+
 static const uint16_t PORT_VGA_STATUS = 0x03DA;
 static const uint16_t PORT_VGA_MISC_WRITE = 0x03C2;
 static const uint16_t PORT_VGA_SEQ_INDEX = 0x03C4;
@@ -79,6 +89,8 @@ static const uint16_t PORT_ATA_PRIMARY_LBA2 = 0x01F5;
 static const uint16_t PORT_ATA_PRIMARY_DRIVE = 0x01F6;
 static const uint16_t PORT_ATA_PRIMARY_COMMAND = 0x01F7;
 static const uint16_t PORT_ATA_PRIMARY_DATA = 0x01F0;
+static const uint16_t PORT_PCI_CONFIG_ADDRESS = 0x0CF8;
+static const uint16_t PORT_PCI_CONFIG_DATA = 0x0CFC;
 static const uint8_t ATA_CMD_READ_PIO = 0x20;
 static const uint8_t ATA_CMD_WRITE_PIO = 0x30;
 static const uint16_t PORT_NOT_APPLICABLE = 0xFFFF;
@@ -113,6 +125,9 @@ uint32_t boot_mb2_mem_upper;
 
 struct driver_status driver_statuses[DRIVER_STATUS_CAPACITY];
 size_t driver_status_count;
+struct pci_device_info pci_devices[PCI_DEVICE_CAPACITY];
+size_t pci_device_count;
+uint32_t pci_devices_detected;
 
 struct vbe_mode_info {
     uint16_t attributes;
@@ -356,6 +371,36 @@ int terminal_clear_dot(uint32_t x, uint32_t y) {
         return -1;
     }
     framebuffer_put_pixel(x, y, terminal_bg_color24());
+    return 0;
+}
+
+int terminal_read_pixel(uint32_t x, uint32_t y, uint32_t* color_out) {
+    if (!framebuffer_video_enabled || color_out == 0 || x >= framebuffer_width || y >= framebuffer_height) {
+        return -1;
+    }
+
+    volatile uint8_t* pixel = framebuffer_memory + ((size_t)y * framebuffer_pitch) + (size_t)x * (framebuffer_bpp / 8u);
+    if (framebuffer_bpp == 32u) {
+        *color_out = *((volatile uint32_t*)pixel) & 0x00FFFFFFu;
+    } else if (framebuffer_bpp == 24u) {
+        *color_out = (uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8) | ((uint32_t)pixel[2] << 16);
+    } else if (framebuffer_bpp == 16u) {
+        uint16_t color565 = *((volatile uint16_t*)pixel);
+        uint32_t r = (uint32_t)((color565 >> 11) & 0x1Fu);
+        uint32_t g = (uint32_t)((color565 >> 5) & 0x3Fu);
+        uint32_t b = (uint32_t)(color565 & 0x1Fu);
+        *color_out = ((r * 255u / 31u) << 16) | ((g * 255u / 63u) << 8) | (b * 255u / 31u);
+    } else {
+        return -1;
+    }
+    return 0;
+}
+
+int terminal_write_pixel(uint32_t x, uint32_t y, uint32_t color) {
+    if (!framebuffer_video_enabled || x >= framebuffer_width || y >= framebuffer_height) {
+        return -1;
+    }
+    framebuffer_put_pixel(x, y, color);
     return 0;
 }
 
@@ -624,6 +669,44 @@ static void driver_status_push(const char* name, uint16_t io_base, uint8_t ready
     driver_statuses[driver_status_count++] = (struct driver_status){ name, io_base, ready };
 }
 
+static uint32_t pci_config_read(uint8_t bus, uint8_t device, uint8_t function, uint8_t offset) {
+    uint32_t address = 0x80000000u | ((uint32_t)bus << 16) |
+                       ((uint32_t)device << 11) | ((uint32_t)function << 8) |
+                       ((uint32_t)offset & 0xFCu);
+    port_write_u32(PORT_PCI_CONFIG_ADDRESS, address);
+    return port_read_u32(PORT_PCI_CONFIG_DATA);
+}
+
+void pci_detect_devices(void) {
+    pci_device_count = 0;
+    pci_devices_detected = 0;
+    for (uint32_t bus = 0; bus < 256u; bus++) {
+        for (uint32_t device = 0; device < 32u; device++) {
+            uint32_t function_zero = pci_config_read((uint8_t)bus, (uint8_t)device, 0u, 0u);
+            if ((function_zero & 0xFFFFu) == 0xFFFFu) {
+                continue;
+            }
+            uint8_t function_limit = ((pci_config_read((uint8_t)bus, (uint8_t)device, 0u, 0x0Cu) >> 16) & 0x80u) ? 8u : 1u;
+            for (uint8_t function = 0; function < function_limit; function++) {
+                uint32_t identity = function == 0u ? function_zero :
+                    pci_config_read((uint8_t)bus, (uint8_t)device, function, 0u);
+                if ((identity & 0xFFFFu) == 0xFFFFu) {
+                    continue;
+                }
+                uint32_t class_info = pci_config_read((uint8_t)bus, (uint8_t)device, function, 0x08u);
+                pci_devices_detected++;
+                if (pci_device_count < PCI_DEVICE_CAPACITY) {
+                    pci_devices[pci_device_count++] = (struct pci_device_info){
+                        (uint8_t)bus, (uint8_t)device, function,
+                        (uint8_t)(class_info >> 24), (uint8_t)(class_info >> 16),
+                        (uint16_t)identity, (uint16_t)(identity >> 16)
+                    };
+                }
+            }
+        }
+    }
+}
+
 static uint8_t ps2_wait_input_clear(uint32_t limit) {
     for (uint32_t spin = 0; spin < limit; spin++) {
         if ((port_read_u8(PORT_PS2_STATUS) & 0x02u) == 0) {
@@ -736,6 +819,7 @@ void detect_drivers(void) {
     status = port_read_u8(PORT_COM1 + 5); driver_status_push("Serial COM1", PORT_COM1, status_is_present(status));
     port_write_u8(PORT_CMOS_INDEX, (uint8_t)(CMOS_NMI_DISABLE | CMOS_REG_STATUS_A)); status = port_read_u8(PORT_CMOS_DATA); driver_status_push("CMOS RTC", PORT_CMOS_INDEX, status_is_present(status)); port_write_u8(PORT_CMOS_INDEX, CMOS_REG_STATUS_A);
     status = port_read_u8(PORT_ATA_PRIMARY_STATUS); driver_status_push("ATA primary", PORT_ATA_PRIMARY_BASE, status_is_present(status));
+    pci_detect_devices();
 }
 
 uint8_t keyboard_poll_scancode(void) {

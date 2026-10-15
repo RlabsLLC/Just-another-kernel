@@ -4,11 +4,13 @@
 #include "Drivers/DriverState.h"
 #include "Drivers/Legacy/TerminalDriver.h"
 #include "Drivers/Latest/VirtualFS.h"
+#include "Drivers/Latest/Plugins.h"
 #include "kernel_utils.h"
-#include "yBash.h"
+#include "kernel_heap.h"
+#include "vsh.h"
 
-const char* const KERNEL_PATCH_VERSION = "26.5.2-2";
-const char* const KERNEL_PATCH_LABEL = "[Patch 26.5.2-2]";
+const char* const KERNEL_PATCH_VERSION = "26.5.3";
+const char* const KERNEL_PATCH_LABEL = "[Patch 26.5.3]";
 
 static void print_driver_statuses(void) {
     for (size_t i = 0; i < driver_status_count; i++) {
@@ -105,7 +107,7 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_addr) {
     terminal_write("Yet/Just Another Kernel\n");
     terminal_write(KERNEL_PATCH_LABEL);
     terminal_putchar('\n');
-    terminal_write("A minimal, custom kernel built by Ring Inc.\n");
+    terminal_write("A minimal, custom kernel built by RingDev.\n");
     print_boot_info(magic, mbi);
     terminal_write("Probing drivers...\n");
     detect_drivers();
@@ -113,7 +115,11 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_addr) {
     terminal_write("Keyboard input mode: polling.\n");
 
     vfs_init();
+    kheap_init();
+    if (plugins_init() != 0) {
+        terminal_write("Plugin subsystem initialization failed.\n");
+    }
     terminal_write("Storage drivers disabled; using RAM VFS only, due to corrupting storage drivers.\n");
 
-    yBash_start(magic, mbi);
+    vsh_start(magic, mbi);
 }

@@ -1,0 +1,39 @@
+JAK 26.5.3:
+
+Bug Fixes:
+[x] Fix mouse being able to wipe screen
+
+Kernel Tweaks:
+[x] Add expansion card detection (not initializing yet)
+[x] Improve memory management (fixed 64 KiB heap with aligned allocation/free)
+
+Features:
+[x] Add vSH (custom Bash shell)
+[x] Rename RTCI to plugins
+[x] Add additional support for plugins (kernel-registered handlers)
+[x] Add compatibility to the GRUB bootloader (Multiboot 1/2)
+[x] Add configure compatibility for GRUB
+
+JAK 26.6:
+
+Bug Fixes:
+[Waiting...]
+
+Kernel Tweaks:
+[ ] Add support for GUI
+[ ] Optimize GPU usage
+[ ] Improve CPU scheduling
+[ ] Enhance I/O handling
+[ ] Improve network stack
+
+Features:
+[ ] Implement file system abstraction layer
+[ ] Add support for virtual memory
+[ ] Implement process scheduling algorithms
+[ ] Add support for device drivers
+
+Experimental Features:
+[ ] Experimental rendering engine to improve rendering performance
+[ ] Experimental storage management system
+[ ] Experimental network additions
+[ ] Add linux kernel driver support

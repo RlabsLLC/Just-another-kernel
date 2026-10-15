@@ -7,6 +7,7 @@ void serial_try_initialize(void);
 uint8_t serial_poll_char(char* out_char);
 void video_try_initialize(uint32_t boot_magic, uint32_t boot_info_addr);
 void detect_drivers(void);
+void pci_detect_devices(void);
 uint8_t keyboard_poll_scancode(void);
 void mouse_try_initialize(void);
 uint8_t mouse_is_available(void);

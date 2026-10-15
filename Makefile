@@ -35,7 +35,7 @@ LDFLAGS := -m elf_i386 -T linker.ld --build-id=none
 BUILD_DIR := build
 SRC_DIR := src
 
-OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/kernel_text.o $(BUILD_DIR)/kernel_format.o $(BUILD_DIR)/yBash.o $(BUILD_DIR)/terminal_driver_legacy.o $(BUILD_DIR)/virtualfs.o
+OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/kernel_text.o $(BUILD_DIR)/kernel_format.o $(BUILD_DIR)/kernel_heap.o $(BUILD_DIR)/vsh.o $(BUILD_DIR)/terminal_driver_legacy.o $(BUILD_DIR)/virtualfs.o $(BUILD_DIR)/plugins.o
 
 .PHONY: all clean
 
@@ -56,13 +56,19 @@ $(BUILD_DIR)/kernel_text.o: $(SRC_DIR)/kernel_text.c | $(BUILD_DIR)
 $(BUILD_DIR)/kernel_format.o: $(SRC_DIR)/kernel_format.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/yBash.o: $(SRC_DIR)/yBash.C | $(BUILD_DIR)
+$(BUILD_DIR)/kernel_heap.o: $(SRC_DIR)/kernel_heap.c $(SRC_DIR)/kernel_heap.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/vsh.o: $(SRC_DIR)/vsh.c | $(BUILD_DIR)
 	$(CC) -x c $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/terminal_driver_legacy.o: $(SRC_DIR)/Drivers/Legacy/TerminalDriver.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/virtualfs.o: $(SRC_DIR)/Drivers/Latest/VirtualFS.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/plugins.o: $(SRC_DIR)/Drivers/Latest/Plugins.c $(SRC_DIR)/Drivers/Latest/Plugins.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/kernel.elf: $(OBJS) linker.ld

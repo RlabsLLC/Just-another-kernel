@@ -9,6 +9,8 @@ void terminal_initialize(void);
 void terminal_clear_screen(void);
 int terminal_draw_dot(uint32_t x, uint32_t y);
 int terminal_clear_dot(uint32_t x, uint32_t y);
+int terminal_read_pixel(uint32_t x, uint32_t y, uint32_t* color_out);
+int terminal_write_pixel(uint32_t x, uint32_t y, uint32_t color);
 void terminal_set_color(uint8_t fg, uint8_t bg);
 void terminal_reset_color(void);
 uint8_t terminal_get_fg_color(void);

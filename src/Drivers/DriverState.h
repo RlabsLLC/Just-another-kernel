@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 enum { DRIVER_STATUS_CAPACITY = 8 };
+enum { PCI_DEVICE_CAPACITY = 32 };
 
 enum {
     MULTIBOOT1_BOOTLOADER_MAGIC = 0x2BADB002u,
@@ -78,6 +79,16 @@ struct driver_status {
     uint8_t ready;
 };
 
+struct pci_device_info {
+    uint8_t bus;
+    uint8_t device;
+    uint8_t function;
+    uint8_t class_code;
+    uint8_t subclass;
+    uint16_t vendor_id;
+    uint16_t device_id;
+};
+
 struct fs_stats {
     uint32_t total_blocks;
     uint32_t meta_blocks;
@@ -124,6 +135,9 @@ extern uint32_t boot_mb2_mem_upper;
 
 extern struct driver_status driver_statuses[DRIVER_STATUS_CAPACITY];
 extern size_t driver_status_count;
+extern struct pci_device_info pci_devices[PCI_DEVICE_CAPACITY];
+extern size_t pci_device_count;
+extern uint32_t pci_devices_detected;
 
 extern struct fs_stats fs_current_stats;
 

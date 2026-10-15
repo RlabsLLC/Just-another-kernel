@@ -208,40 +208,7 @@ build_boot_iso() {
     mkdir -p "$staging_dir/boot/grub"
     cp "$KERNEL_ELF" "$staging_dir/boot/kernel.elf"
 
-    cat > "$staging_dir/boot/grub/grub.cfg" <<'EOF'
-set timeout=0
-set default=0
-
-# Prefer graphical terminal on firmware that lacks legacy text console.
-if loadfont /boot/grub/fonts/unicode.pf2; then
-    insmod all_video
-    insmod vbe
-    insmod video_bochs
-    insmod video_cirrus
-    insmod gfxterm
-    set gfxmode=1024x768x32,1024x768x24,1024x768x16,auto
-    terminal_output gfxterm
-else
-    terminal_output console
-fi
-
-# Keep keyboard input available across firmware implementations.
-terminal_input at_keyboard
-terminal_input --append console
-terminal_input --append serial
-
-menuentry "Just another kernel" {
-    set gfxpayload=1024x768x32,1024x768x24,1024x768x16,keep
-    insmod multiboot
-    insmod multiboot2
-
-    if ! multiboot2 /boot/kernel.elf; then
-        multiboot /boot/kernel.elf
-    fi
-
-    boot
-}
-EOF
+    cp "$ROOT_DIR/boot/grub/grub.cfg" "$staging_dir/boot/grub/grub.cfg"
 
     grub-mkrescue -o "$BOOT_ISO" "$staging_dir" >/dev/null
 }
